@@ -1,0 +1,6 @@
+@Route.Backend_HostAddress = http://localhost:5256
+
+GET {{Route.Backend_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
