@@ -1,0 +1,229 @@
+﻿@page "/admin/vehicles"
+
+@inject VehiclesClient VehiclesClient
+@inject ProvidersClient ProvidersClient
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<MudPaper Class="pa-3">
+
+    <!-- Barra superior responsive (título + buscador + botón) -->
+    <MudGrid Spacing="2" AlignItems="Center" Class="mb-2">
+        <MudItem xs="12" sm="4" md="3">
+            <MudText Typo="Typo.h6" Class="mb-0">Vehículos</MudText>
+        </MudItem>
+
+        <MudItem xs="12" sm="6" md="6">
+            <MudTextField T="string"
+                          Value="_searchText"
+                          ValueChanged="@(async v => await OnSearchChanged(v))"
+                          Placeholder="Buscar por placa, marca, modelo, proveedor…"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search"
+                          Immediate="true"
+                          DebounceInterval="300"
+                          FullWidth="true" />
+        </MudItem>
+
+        <MudItem xs="12" sm="2" md="3" Class="text-start mud-justify-end">
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="CreateAsync">
+            @* <MudButton Variant="Variant.Filled" 
+                       StartIcon="@Icons.Material.Filled.Add" 
+                       Color="Color.Info" 
+                       Size="Size.Small" 
+                       OnClick="CreateAsync"> *@
+                Nuevo
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+
+    <!-- Tabla server-side -->
+    <MudTable T="Vehicle"
+              @ref="_table"
+              ServerData="LoadServerData"
+              Hover="true"
+              Dense="true"
+              Bordered="true"
+              Breakpoint="Breakpoint.Sm"
+              RowsPerPage="10"              
+              HidePagerWhenSinglePage="false">
+
+        <HeaderContent>
+            <MudTh>
+                <MudTableSortLabel T="string" SortLabel="Plate" InitialDirection="SortDirection.Ascending">
+                    Placa
+                </MudTableSortLabel>
+            </MudTh>
+            <MudTh>Proveedor</MudTh>
+            <MudTh>Marca / Modelo</MudTh>
+            <MudTh align="Align.Right">Capacidad Kg</MudTh>
+            <MudTh align="Align.Right">Capacidad m³</MudTh>
+            <MudTh align="Align.Right">Asientos</MudTh>
+            <MudTh>Tipo</MudTh>
+            <MudTh>Status</MudTh>
+            <MudTh Class="text-end">Acciones</MudTh>
+        </HeaderContent>
+
+        <RowTemplate>
+            <MudTd DataLabel="Plate">@context.Plate</MudTd>
+            <MudTd DataLabel="Provider">@GetProviderName(context.ProviderId)</MudTd>
+            <MudTd DataLabel="Brand / Model">@context.Brand @(" / ") @context.Model</MudTd>
+            <MudTd DataLabel="Cap. Kg" Align="Align.Right">@context.CapacityKg.ToString("0.##")</MudTd>
+            <MudTd DataLabel="Cap. m³" Align="Align.Right">@context.CapacityVolM3.ToString("0.##")</MudTd>
+            <MudTd DataLabel="Seats" Align="Align.Right">@context.Seats</MudTd>
+            <MudTd DataLabel="Type">@context.Type</MudTd>
+            <MudTd DataLabel="Status">
+                <!-- Chip de solo visualización (sin T genérico) -->
+                <MudChip T="bool" Color="@(context.IsActive? Color.Success: Color.Error)"
+                         Variant="Variant.Outlined"
+                         Size="Size.Small">
+                    @(context.IsActive ? "Active" : "Inactive")
+                </MudChip>
+            </MudTd>
+            <MudTd Class="text-end">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                               Size="Size.Small"
+                               OnClick="@(() => EditAsync(context))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                               Size="Size.Small"
+                               Color="Color.Error"
+                               OnClick="@(() => DeleteAsync(context))" />
+            </MudTd>
+        </RowTemplate>
+        <PagerContent>
+            <MudTablePager PageSizeOptions="new int[] { 5, 10, 20, 50, 100 }" />
+        </PagerContent>
+    </MudTable>
+</MudPaper>
+
+@code {
+    private string _searchText = string.Empty;
+    private MudTable<Vehicle>? _table;
+
+    // Cache de nombres de proveedores para mostrar en la grilla
+    private readonly Dictionary<int, string> _providerNames = new();
+
+   
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {   
+            // Cargamos una lista simple de proveedores para poder mostrar el nombre en la columna
+            var page = await ProvidersClient.GetPagedAsync(page: 1, recordsNumber: 1000);
+            foreach (var p in page?.Items ?? Array.Empty<Provider>())
+                _providerNames[p.Id] = p.Name; // cache para mostrar el nombre en la tabla
+        }
+        catch
+        {
+            Snackbar.Add("No se pudo cargar proveedores.", Severity.Error);
+        }
+    }
+
+    private string GetProviderName(int providerId)
+        => _providerNames.TryGetValue(providerId, out var name) ? name : $"#{providerId}";
+
+    private async Task OnSearchChanged(string value)
+    {
+        _searchText = value;
+        if (_table is not null)
+            await _table.ReloadServerData();
+    }
+
+    private async Task<TableData<Vehicle>> LoadServerData(TableState state, CancellationToken cancellationToken)
+    {
+        var sortBy  = string.IsNullOrWhiteSpace(state.SortLabel) ? "Plate" : state.SortLabel!;
+        var sortDir = state.SortDirection == SortDirection.Descending ? "desc" : "asc";
+        var page    = state.Page + 1;                  // MudTable usa base 0
+        var size    = state.PageSize == 0 ? 10 : state.PageSize;
+
+        var result = await VehiclesClient.GetPagedAsync(
+            searchTerm: _searchText,
+            page: page,
+            recordsNumber: size,
+            sortBy: sortBy,
+            sortDirection: sortDir,
+            cancellationToken: cancellationToken
+            );
+
+        return new TableData<Vehicle>
+        {
+            Items = result?.Items ?? Array.Empty<Vehicle>(),
+            TotalItems = result?.Total ?? 0
+        };
+    }
+
+    // private async Task CreateAsync()
+    // {
+    //     var parameters = new DialogParameters { ["VehicleModel"] = new Vehicle { IsActive = true } };
+    //     var dialog = await DialogService.ShowAsync<VehicleDialog>("Nuevo vehículo", parameters);
+    //     var result = await dialog.Result;
+
+    //     if (!result.Canceled && _table is not null)
+    //         await _table.ReloadServerData();
+    // }
+    private async Task CreateAsync()
+    {
+        var parameters = new DialogParameters
+        {
+            ["VehicleModel"] = new Vehicle { IsActive = true } // <-- nombre correcto
+        };
+
+        var dialog = await DialogService.ShowAsync<VehicleDialog>("New vehicle", parameters);
+        var result = await dialog.Result;
+        if (!result.Canceled && _table is not null)
+            await _table.ReloadServerData();
+    }
+
+    // private async Task EditAsync(Vehicle vehicle)
+    // {
+    //     var parameters = new DialogParameters { ["VehicleModel"] = vehicle };
+    //     var dialog = await DialogService.ShowAsync<VehicleDialog>("Editar vehículo", parameters);
+    //     var result = await dialog.Result;
+
+    //     if (!result.Canceled && _table is not null)
+    //         await _table.ReloadServerData();
+    // }
+
+    private async Task EditAsync(Vehicle vehicle)
+    {
+        var parameters = new DialogParameters
+        {
+            ["VehicleModel"] = vehicle // <-- nombre correcto
+        };
+
+        var dialog = await DialogService.ShowAsync<VehicleDialog>("Edit vehicle", parameters);
+        var result = await dialog.Result;
+        if (!result.Canceled && _table is not null)
+            await _table.ReloadServerData();
+    }
+
+    private async Task DeleteAsync(Vehicle vehicle)
+    {
+        var confirm = await DialogService.ShowMessageBox(
+            "Eliminar",
+            $"Eliminar vehículo '{vehicle.Plate}'?",
+            yesText: "Delete",
+            cancelText: "Cancel") ?? false;
+
+        if (!confirm) return;
+
+        // capturamos la tupla
+        //var (ok, error, status) = await VehiclesClient.DeleteAsync(vehicle.Id);
+        var (ok, error, _) = await VehiclesClient.DeleteAsync(vehicle.Id);
+
+        if (ok)
+        {
+            Snackbar.Add("Eliminar", Severity.Success);
+            if (_table is not null) await _table.ReloadServerData();
+        }
+        else
+        {
+            //Snackbar.Add(error ?? $"Delete failed ({status})", Severity.Error);
+            Snackbar.Add(error ?? $"Error al eliminar ", Severity.Error);
+        }
+    }
+}
+

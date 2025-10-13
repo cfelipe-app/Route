@@ -1,0 +1,75 @@
+﻿
+@inject ProvidersClient ProvidersClient
+@inject ISnackbar Snackbar
+
+<MudDialog MaxWidth="MaxWidth.Small" FullWidth="true">
+    <DialogContent>
+        <MudForm @ref="_form" Model="@EditModel">
+            @* <MudText Typo="Typo.h6" Class="mb-2">@(_isNew ? "Nuevo proveedor" : "Editar proveedor")</MudText> *@
+
+            <MudTextField T="string" Label="Nombre" @bind-Value="EditModel.Name" Required="true" RequiredError="El nombre es obligatorio" For="@(() => EditModel.Name)" />
+            <MudTextField T="string" Label="Ruc" @bind-Value="EditModel.TaxId" Required="true" RequiredError="El ruc es obligatorio" For="@(() => EditModel.TaxId)" />
+            <MudTextField T="string" Label="Contacto" @bind-Value="EditModel.ContactName" />
+            <MudTextField T="string" Label="Email" @bind-Value="EditModel.Email" />
+            <MudTextField T="string" Label="Teléfono" @bind-Value="EditModel.Phone" />
+            <MudTextField T="string" Label="Dirección" @bind-Value="EditModel.Address" />
+            <MudCheckBox T="bool" Label="Activo" @bind-Checked="EditModel.IsActive" />
+        </MudForm>
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton Variant="Variant.Outlined" OnClick="() => MudDialog.Cancel()" Disabled="@_busy">Cancelar</MudButton>
+        <MudButton Color="Color.Primary" OnClick="SaveAsync" Disabled="@_busy">Guardar</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [Parameter] public Provider Model { get; set; } = new();
+    [CascadingParameter] public IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private MudForm? _form;
+    private Provider EditModel = new();
+    private bool _busy;
+    private bool _isNew => EditModel.Id == 0;
+
+    protected override void OnParametersSet()
+    {
+        // Copia para no editar por referencia
+        EditModel = new Provider
+        {
+            Id = Model.Id,
+            Name = Model.Name,
+            TaxId = Model.TaxId,
+            ContactName = Model.ContactName,
+            Email = Model.Email,
+            Phone = Model.Phone,
+            Address = Model.Address,
+            IsActive = Model.IsActive
+        };
+    }
+
+    private async Task SaveAsync()
+    {
+        await _form!.Validate();
+        if (!_form.IsValid) { Snackbar.Add("Por favor revise los campos requeridos.", Severity.Warning); return; }
+
+        _busy = true;
+        try
+        {
+            (bool ok, string? error) result =
+                _isNew ? await ProvidersClient.CreateRawAsync(EditModel)
+                       : await ProvidersClient.UpdateRawAsync(EditModel);
+
+            if (result.ok)
+            {
+                Snackbar.Add(_isNew ? "Proveedor creado" : "Providor actualizado", Severity.Success);
+                MudDialog.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                Snackbar.Add(result.error ?? "Error al guardar", Severity.Error);
+            }
+        }
+        finally { _busy = false; }
+    }
+}

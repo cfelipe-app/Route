@@ -8,14 +8,42 @@ using System.Threading.Tasks;
 
 namespace Route.Shared.Entities
 {
+    //public class RoutePlan : IEntityWithId
+    //{
+    //    public int Id { get; set; }
+    //    public DateTime ServiceDate { get; set; }
+    //    public int? VehicleId { get; set; }
+    //    public Vehicle? Vehicle { get; set; }
+    //    public int? ProviderId { get; set; }
+    //    public Provider? Provider { get; set; }
+    //    public string? Code { get; set; }       // e.g., "V1", "Z-02"
+    //    public RouteStatus Status { get; set; } = RouteStatus.Draft;
+    //    public DateTime? StartTime { get; set; }
+    //    public DateTime? EndTime { get; set; }
+    //    public double DistanceKm { get; set; }
+    //    public double DurationMin { get; set; }
+    //    public string? ColorHex { get; set; }
+    //    public string? DriverUserId { get; set; }
+    //    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    //    public ICollection<RouteOrder> Orders { get; set; } = new List<RouteOrder>();
+    //}
+
     public class RoutePlan : IEntityWithId
     {
         public int Id { get; set; }
         public DateTime ServiceDate { get; set; }
+
         public int? VehicleId { get; set; }
         public Vehicle? Vehicle { get; set; }
+
         public int? ProviderId { get; set; }
         public Provider? Provider { get; set; }
+
+        // 🔹 Conductor asignado a la ruta del día (nuevo)
+        public int? DriverId { get; set; }
+
+        public Driver? Driver { get; set; }
+
         public string? Code { get; set; }       // e.g., "V1", "Z-02"
         public RouteStatus Status { get; set; } = RouteStatus.Draft;
         public DateTime? StartTime { get; set; }
@@ -23,7 +51,10 @@ namespace Route.Shared.Entities
         public double DistanceKm { get; set; }
         public double DurationMin { get; set; }
         public string? ColorHex { get; set; }
+
+        // Si te sirve seguir guardando el id de usuario (Identity) lo puedes mantener:
         public string? DriverUserId { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public ICollection<RouteOrder> Orders { get; set; } = new List<RouteOrder>();
     }

@@ -1,70 +1,54 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Route.Backend.UnitsOfWork.Interfaces;
+using Route.Shared.Interfaces;
 
 namespace Route.Backend.Controllers
 {
-    public class GenericController<T> : Controller where T : class
+    public abstract class GenericController<T> : ControllerBase where T : class, IEntityWithId
     {
-        private readonly IGenericUnitOfWork<T> _unitOfWork;
+        protected readonly IGenericUnitOfWork<T> UnitOfWork;
 
-        public GenericController(IGenericUnitOfWork<T> unitOfWork)
-        {
-            _unitOfWork = unitOfWork;
-        }
+        protected GenericController(IGenericUnitOfWork<T> unitOfWork)
+            => UnitOfWork = unitOfWork;
 
         [HttpGet]
-        public virtual async Task<IActionResult> GetAsync()
+        public virtual async Task<ActionResult<IEnumerable<T>>> GetAsync()
         {
-            var action = await _unitOfWork.GetAsync();
-            if (action.WasSuccess)
-            {
-                return Ok(action.Result);
-            }
-            return BadRequest();
+            var op = await UnitOfWork.GetAsync();
+            return op.WasSuccess ? Ok(op.Result) : BadRequest(op.Message);
         }
 
-        [HttpGet("{id}")]
-        public virtual async Task<IActionResult> GetAsync(int id)
+        [HttpGet("{id:int}")]
+        public virtual async Task<ActionResult<T>> GetByIdAsync(int id)
         {
-            var action = await _unitOfWork.GetAsync(id);
-            if (action.WasSuccess)
-            {
-                return Ok(action.Result);
-            }
-            return NotFound();
+            var op = await UnitOfWork.GetAsync(id);
+            return op.WasSuccess && op.Result is not null ? Ok(op.Result) : NotFound();
         }
 
         [HttpPost]
-        public virtual async Task<IActionResult> PostAsync(T model)
+        public virtual async Task<ActionResult<T>> PostAsync([FromBody] T model)
         {
-            var action = await _unitOfWork.AddAsync(model);
-            if (action.WasSuccess)
-            {
-                return Ok(action.Result);
-            }
-            return BadRequest(action.Message);
+            var op = await UnitOfWork.AddAsync(model);
+            if (!op.WasSuccess) return BadRequest(op.Message);
+
+            // Devuelve Location: /api/{controller}/{id}
+            return CreatedAtAction(nameof(GetByIdAsync), new { id = op.Result!.Id }, op.Result);
         }
 
-        [HttpPut]
-        public virtual async Task<IActionResult> PutAsync(T model)
+        [HttpPut("{id:int}")]
+        public virtual async Task<IActionResult> PutAsync(int id, [FromBody] T model)
         {
-            var action = await _unitOfWork.UpdateAsync(model);
-            if (action.WasSuccess)
-            {
-                return Ok(action.Result);
-            }
-            return BadRequest(action.Message);
+            if (id != model.Id) return BadRequest("Id mismatch.");
+
+            var op = await UnitOfWork.UpdateAsync(model);
+            return op.WasSuccess ? NoContent() : BadRequest(op.Message);
         }
 
-        [HttpDelete("{id}")]
+        [HttpDelete("{id:int}")]
         public virtual async Task<IActionResult> DeleteAsync(int id)
         {
-            var action = await _unitOfWork.DeleteAsync(id);
-            if (action.WasSuccess)
-            {
-                return NoContent();
-            }
-            return BadRequest(action.Message);
+            var op = await UnitOfWork.DeleteAsync(id);
+            return op.WasSuccess ? NoContent() : BadRequest(op.Message);
         }
     }
 }

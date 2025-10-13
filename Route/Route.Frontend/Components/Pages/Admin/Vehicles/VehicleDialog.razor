@@ -1,0 +1,164 @@
+﻿@inject VehiclesClient VehiclesClient
+@inject ProvidersClient ProvidersClient
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudForm @ref="_form" Model="VehicleModel">
+            <MudGrid>
+
+                <!-- Plate -->
+                <MudItem xs="12" sm="6">
+                    <MudTextField @bind-Value="VehicleModel.Plate"
+                                  Label="Plate"
+                                  For="@(() => VehicleModel.Plate)"
+                                  Required="true" />
+                </MudItem>
+
+                <!-- Provider -->
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="int"
+                               @bind-Value="VehicleModel.ProviderId"
+                               Label="Provider"
+                               For="@(() => VehicleModel.ProviderId)"
+                               Required="true">
+                        @foreach (var p in _providers)
+                        {
+                            <MudSelectItem T="int" Value="@p.Id">@p.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+
+                <!-- Brand / Model -->
+                <MudItem xs="12" sm="6">
+                    <MudTextField @bind-Value="VehicleModel.Brand"
+                                  Label="Brand"
+                                  For="@(() => VehicleModel.Brand)" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudTextField @bind-Value="VehicleModel.Model"
+                                  Label="Model"
+                                  For="@(() => VehicleModel.Model)" />
+                </MudItem>
+
+                <!-- Numeric fields -->
+                <MudItem xs="12" sm="4">
+                    <MudNumericField T="double"
+                                     @bind-Value="VehicleModel.CapacityKg"
+                                     Label="Capacity (Kg)"
+                                     Min="0"
+                                     For="@(() => VehicleModel.CapacityKg)" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudNumericField T="double"
+                                     @bind-Value="VehicleModel.CapacityVolM3"
+                                     Label="Volume (m³)"
+                                     Min="0"
+                                     For="@(() => VehicleModel.CapacityVolM3)" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudNumericField T="int"
+                                     @bind-Value="VehicleModel.Seats"
+                                     Label="Seats"
+                                     Min="1"
+                                     For="@(() => VehicleModel.Seats)" />
+                </MudItem>
+
+                <!-- Type -->
+                <MudItem xs="12" sm="6">
+                    <MudTextField @bind-Value="VehicleModel.Type"
+                                  Label="Type"
+                                  For="@(() => VehicleModel.Type)" />
+                </MudItem>
+
+                <!-- Capacity label (1.5 TN, 3.5T, etc.) -->
+                <MudItem xs="12" sm="6">
+                    <MudTextField @bind-Value="VehicleModel.CapacityTonnageLabel"
+                                  Label="Capacity label (e.g. 1.5 TN)"
+                                  For="@(() => VehicleModel.CapacityTonnageLabel)" />
+                </MudItem>
+
+                <!-- Active (checkbox) -->
+                <MudItem xs="12" sm="6" Class="d-flex align-center">
+                    <MudCheckBox T="bool"
+                                 @bind-Checked="VehicleModel.IsActive"
+                                 Label="Active"
+                                 For="@(() => VehicleModel.IsActive)" />
+                </MudItem>
+
+            </MudGrid>
+        </MudForm>
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton Variant="Variant.Filled" Color="Color.Secondary" OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [Parameter] public Vehicle VehicleModel { get; set; } = new();
+
+    private MudForm? _form;
+    private List<Provider> _providers = new();
+
+    [CascadingParameter] public IMudDialogInstance MudDialog { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var paged = await ProvidersClient.GetPagedAsync(recordsNumber: 1000);
+            _providers = paged?.Items?.OrderBy(p => p.Name).ToList() ?? new();
+        }
+        catch
+        {
+            _providers = new();
+            Snackbar.Add("No se pudo cargar proveedores.", Severity.Error);
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        await _form!.Validate();
+        if (!_form.IsValid)
+        {
+            Snackbar.Add("Please review the required fields.", Severity.Warning);
+            return;
+        }
+
+        // Normaliza y evita enviar navegación
+        var payload = new Vehicle
+        {
+            Id = VehicleModel.Id,                                 // 0 si es nuevo
+            ProviderId = VehicleModel.ProviderId,
+            Plate = (VehicleModel.Plate ?? "").Trim().ToUpperInvariant(),
+            Brand = string.IsNullOrWhiteSpace(VehicleModel.Brand) ? null : VehicleModel.Brand.Trim(),
+            Model = string.IsNullOrWhiteSpace(VehicleModel.Model) ? null : VehicleModel.Model.Trim(),
+            CapacityKg = VehicleModel.CapacityKg,
+            CapacityVolM3 = VehicleModel.CapacityVolM3,
+            Seats = VehicleModel.Seats,
+            Type = string.IsNullOrWhiteSpace(VehicleModel.Type) ? null : VehicleModel.Type.Trim(),
+            CapacityTonnageLabel = string.IsNullOrWhiteSpace(VehicleModel.CapacityTonnageLabel)
+                ? null : VehicleModel.CapacityTonnageLabel.Trim(),
+            IsActive = VehicleModel.IsActive
+            // Provider / Routes no se envían
+        };
+
+        var (ok, error, _) = payload.Id == 0
+            ? await VehiclesClient.CreateAsync(payload)
+            : await VehiclesClient.UpdateAsync(payload);
+
+        if (ok)
+        {
+            Snackbar.Add(payload.Id == 0 ? "Vehicle created" : "Vehicle updated", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        else
+        {
+            Snackbar.Add(error ?? "Save failed", Severity.Error);
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}
