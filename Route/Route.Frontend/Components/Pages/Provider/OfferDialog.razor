@@ -1,0 +1,139 @@
+﻿
+
+@inject VehicleOffersClient OffersApi
+@inject ISnackbar Snackbar
+<MudDialog MaxWidth="MaxWidth.Small" FullWidth="true">
+    <DialogContent>
+        <EditForm Model="_form" OnValidSubmit="SaveAsync">
+            <DataAnnotationsValidator />
+            <MudStack Spacing="2">
+                @* <MudText Typo="Typo.h6">@(_isEdit ? "Editar oferta" : "Nueva oferta")</MudText> *@
+
+                @* Ya NO pedimos CapacityRequestId ni ProviderId *@
+
+                <MudNumericField T="int" @bind-Value="_form.Quantity" Label="Cantidad de unidades" Required="true" Min="1" />
+                <MudNumericField T="double" @bind-Value="_form.OfferedWeightKg" Label="Peso por unidad (kg)" Min="0" />
+                <MudNumericField T="double" @bind-Value="_form.OfferedVolumeM3" Label="Volumen por unidad (m³)" Min="0" />
+
+                <MudSelect T="PriceMode" Label="Modo de precio" @bind-Value="_form.PriceMode" Required="true">
+                    <MudSelectItem Value="@PriceMode.PerVehicle">Por vehículo</MudSelectItem>
+                    <MudSelectItem Value="@PriceMode.Total">Total</MudSelectItem>
+                </MudSelect>
+
+                <MudNumericField T="decimal" @bind-Value="_form.Price" Label="Precio" Required="true" Min="0" />
+                <MudTextField @bind-Value="_form.Currency" Label="Moneda (3 letras)" Required="true" MaxLength="3" Immediate="true" />
+                <MudDatePicker @bind-Date="_form.ValidUntil" Label="Vigencia (opcional)" />
+                <MudTextField @bind-Value="_form.Notes" Label="Notas" Lines="3" />
+
+                <MudStack Row="true" Justify="@Justify.FlexEnd" Spacing="1">
+                    <MudButton Variant="Variant.Text" OnClick="Cancel">Cancelar</MudButton>
+                    <MudButton Color="Color.Primary" ButtonType="ButtonType.Submit">@(_isEdit ? "Guardar" : "Crear")</MudButton>
+                </MudStack>
+            </MudStack>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] public IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public int CapacityRequestId { get; set; }
+    [Parameter] public int ProviderId { get; set; }
+    [Parameter] public VehicleOffer? CurrentOffer { get; set; }
+
+    private bool _isEdit => CurrentOffer is not null;
+
+    public class OfferFormModel
+    {
+        public int CapacityRequestId { get; set; }
+        public int ProviderId { get; set; }
+        public int? VehicleId { get; set; }
+        public int Quantity { get; set; } = 1;
+        public double OfferedWeightKg { get; set; }
+        public double OfferedVolumeM3 { get; set; }
+        public decimal Price { get; set; }
+        public string Currency { get; set; } = "PEN";
+        public PriceMode PriceMode { get; set; } = PriceMode.PerVehicle;
+        public DateTime? ValidUntil { get; set; }
+        public string? Notes { get; set; }
+    }
+
+    private OfferFormModel _form = new();
+
+    protected override void OnInitialized()
+    {
+        if (_isEdit)
+        {
+            _form = new OfferFormModel
+            {
+                CapacityRequestId = CurrentOffer!.CapacityRequestId,
+                ProviderId = CurrentOffer.ProviderId,
+                VehicleId = CurrentOffer.VehicleId,
+                Quantity = CurrentOffer.Quantity,
+                OfferedWeightKg = CurrentOffer.OfferedWeightKg,
+                OfferedVolumeM3 = CurrentOffer.OfferedVolumeM3,
+                Price = CurrentOffer.Price,
+                Currency = CurrentOffer.Currency,
+                PriceMode = CurrentOffer.PriceMode,
+                ValidUntil = CurrentOffer.ValidUntil,
+                Notes = CurrentOffer.Notes
+            };
+        }
+        else
+        {
+            _form = new OfferFormModel
+            {
+                CapacityRequestId = CapacityRequestId,
+                ProviderId = ProviderId,
+                Quantity = 1,
+                Currency = "PEN",
+                PriceMode = PriceMode.PerVehicle
+            };
+        }
+
+        if (_form.CapacityRequestId <= 0)
+            Snackbar.Add("Falta el requerimiento: abre el diálogo desde un requerimiento o pásalo como parámetro.", Severity.Warning);
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_form.CapacityRequestId <= 0)
+        {
+            Snackbar.Add("No se puede guardar: falta el Id de requerimiento.", Severity.Error);
+            return;
+        }
+
+        var currency = string.IsNullOrWhiteSpace(_form.Currency) ? "PEN" : _form.Currency.Trim().ToUpperInvariant();
+        if (currency.Length > 3) currency = currency[..3];
+
+        var dto = new VehicleOffersClient.SaveVehicleOfferDto(
+            CapacityRequestId: _form.CapacityRequestId,
+            ProviderId: _form.ProviderId,
+            VehicleId: _form.VehicleId,
+            Quantity: Math.Max(1, _form.Quantity),
+            OfferedWeightKg: Math.Max(0, _form.OfferedWeightKg),
+            OfferedVolumeM3: Math.Max(0, _form.OfferedVolumeM3),
+            Price: Math.Max(0, _form.Price),
+            Currency: currency,
+            PriceMode: _form.PriceMode,
+            ValidUntil: _form.ValidUntil,
+            Notes: _form.Notes
+        );
+
+        var response = _isEdit
+            ? await OffersApi.UpdateAsync(CurrentOffer!.Id, dto)
+            : await OffersApi.CreateAsync(dto); // si tu ruta es "api/vehicleoffers/create", ajústalo en el client
+
+        if (response.IsSuccessStatusCode)
+        {
+            Snackbar.Add("Oferta guardada", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        else
+        {
+            Snackbar.Add($"Error: {await response.Content.ReadAsStringAsync()}", Severity.Error);
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

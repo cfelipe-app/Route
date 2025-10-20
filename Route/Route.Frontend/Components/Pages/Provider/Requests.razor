@@ -1,0 +1,258 @@
+﻿@page "/provider/requests"
+
+@using System.ComponentModel      <!-- Para DescriptionAttribute -->
+@using System.Linq
+@using System.Threading
+@using Route.Shared               <!-- PagedResult, PaginationDTO si viven aquí -->
+@using Route.Shared.Entities      <!-- CapacityRequest, Provider -->
+@using Route.Shared.Enums         <!-- CapacityReqStatus -->
+@using Route.Shared.DTOs          <!-- si necesitas DTOs -->
+@* ajusta estos usings si tus tipos viven en otros namespaces *@
+
+@inject CapacityRequestsClient RequestsApi
+@inject ProvidersClient ProvidersApi
+@inject IDialogService Dialog
+@inject ISnackbar Snackbar
+
+@* Simula roles mientras no hay auth *@
+@code { [Parameter] public bool IsAdmin { get; set; } = false; }
+
+<MudStack Spacing="2">
+  <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+    <MudText Typo="Typo.h5">Requerimientos de capacidad</MudText>
+  </MudStack>
+
+  <!-- Filtros -->
+  <MudPaper Class="p-4">
+    <MudStack Row="true" Spacing="2" AlignItems="AlignItems.End">
+
+      <MudTextField @bind-Value="_filters.Term"
+                    Label="Buscar (zona/notas)"
+                    Adornment="Adornment.Start"
+                    AdornmentIcon="@Icons.Material.Filled.Search" />
+
+      @if (IsAdmin)
+      {
+        <MudAutocomplete T="Provider"
+                         @bind-Value="_selectedProvider"
+                         Label="Proveedor (visibilidad)"
+                         ToStringFunc="ProviderToString"
+                         SearchFunc="SearchProviders"
+                         ResetValueOnEmptyText="true"
+                         Clearable="true"
+                         Dense="true" />
+      }
+
+      <MudDatePicker Label="Desde (servicio)" @bind-Date="_filters.FromDate" />
+      <MudDatePicker Label="Hasta (servicio)" @bind-Date="_filters.ToDate" />
+
+      <MudSelect T="CapacityReqStatus?" Label="Estado" @bind-Value="_filters.Status" Clearable="true">
+        @foreach (var st in _statusOptions)
+        {
+          <MudSelectItem T="CapacityReqStatus?" Value="@((CapacityReqStatus?)st)">
+            @StatusLabel(st)
+          </MudSelectItem>
+        }
+      </MudSelect>
+
+      <MudSwitch T="bool" @bind-Checked="_filters.VisibleForProvider" Color="Color.Primary" />
+      <MudText>Solo visibles para mi proveedor</MudText>
+
+      <MudButton OnClick="Reload" Color="Color.Primary" Variant="Variant.Filled">Aplicar</MudButton>
+      <MudButton OnClick="ClearFilters" Variant="Variant.Outlined">Limpiar</MudButton>
+    </MudStack>
+  </MudPaper>
+
+  <!-- Tabla -->
+  <MudTable Items="_items" Dense="true" Hover="true" Bordered="true">
+    <HeaderContent>
+      <MudTh>Id</MudTh>
+      <MudTh>Fecha</MudTh>
+      <MudTh>Zona</MudTh>
+      <MudTh>Demanda</MudTh>
+      <MudTh>Ventana</MudTh>
+      <MudTh>Solo prov.</MudTh>
+      <MudTh>Proveedor destino</MudTh>
+      <MudTh>Estado</MudTh>
+      <MudTh></MudTh>
+    </HeaderContent>
+
+    <RowTemplate>
+      <MudTd>@context.Id</MudTd>
+      <MudTd>@context.ServiceDate.ToString("yyyy-MM-dd")</MudTd>
+      <MudTd>@context.Zone</MudTd>
+      <MudTd>@($"{context.DemandWeightKg:N0} kg / {context.DemandVolumeM3:N1} m³ / {context.DemandStops}")</MudTd>
+      <MudTd>@($"{context.WindowStart:hh\\:mm}–{context.WindowEnd:hh\\:mm}")</MudTd>
+      <MudTd>@(context.OnlyTargetProvider ? "Sí" : "No")</MudTd>
+      <MudTd>@(context.ProviderId is int pid ? $"#{pid}" : "-")</MudTd>
+      <MudTd>
+        <MudChip T="String" Variant="Variant.Filled" Color="@ChipColor(context.Status)">
+          @StatusLabel(context.Status)
+        </MudChip>
+      </MudTd>
+      <MudTd>
+        <MudButton Size="Size.Small"
+                   Color="Color.Primary"
+                   Variant="Variant.Outlined"
+                   Disabled="@(!CanCreateOffer(context))"
+                   OnClick="@(() => OpenCreateOffer(context))">
+          Nueva oferta
+        </MudButton>
+      </MudTd>
+    </RowTemplate>
+  </MudTable>
+
+  <!-- Paginación -->
+  <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+    <MudText>Total: @_total</MudText>
+
+    <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+      <MudText>Por página</MudText>
+      <MudSelect T="int" @bind-Value="_pagination.RecordsNumber" Style="width:100px"
+                 OnClose="@(async _ => await OnPageSizeChanged(_pagination.RecordsNumber))">
+        @foreach (var size in _pageSizes)
+        {
+          <MudSelectItem Value="@size">@size</MudSelectItem>
+        }
+      </MudSelect>
+
+      <MudPagination Page="@_pagination.Page" Count="@_pages" PageChanged="OnPageChanged" />
+    </MudStack>
+  </MudStack>
+</MudStack>
+
+@code {
+  // ========= Estado UI =========
+  List<CapacityRequest> _items = new();
+  int _total = 0;
+  int _pages => (int)Math.Ceiling((_total == 0 ? 1 : _total) / (double)_pagination.RecordsNumber);
+  readonly int[] _pageSizes = new[] { 10, 20, 50 };
+
+  // Proveedor actual (simulado sin auth)
+  int _currentProviderId = 1;
+
+  // ADMIN: proveedor (filtro de visibilidad)
+  Provider? _selectedProvider;
+
+  // Filtros + paginación
+  class Filters
+  {
+    public string? Term { get; set; }
+    public CapacityReqStatus? Status { get; set; }
+    public DateTime? FromDate { get; set; }
+    public DateTime? ToDate { get; set; }
+    public bool VisibleForProvider { get; set; } = true;
+  }
+
+  Filters _filters = new();
+  PaginationDTO _pagination = new() { Page = 1, RecordsNumber = 20, SortBy = "ServiceDate", SortDir = "desc" };
+  CapacityReqStatus[] _statusOptions = Enum.GetValues<CapacityReqStatus>();
+
+  // ========= Ciclo de vida =========
+  protected override async Task OnInitializedAsync() => await Reload();
+
+  // ========= Carga =========
+  async Task Reload()
+  {
+    _pagination.Term = string.IsNullOrWhiteSpace(_filters.Term) ? null : _filters.Term!.Trim();
+
+    var page = await RequestsApi.GetPagedAsync(
+      p: _pagination,
+      status: _filters.Status,
+      providerId: IsAdmin ? _selectedProvider?.Id : _currentProviderId,
+      visibleForProvider: _filters.VisibleForProvider,
+      fromDate: _filters.FromDate,
+      toDate: _filters.ToDate
+    );
+
+    _items = page.Items?.ToList() ?? new();
+    _total = page.Total;
+    StateHasChanged();
+  }
+
+  void ClearFilters()
+  {
+    _filters = new Filters { VisibleForProvider = true };
+    _selectedProvider = null;
+    _pagination = new() { Page = 1, RecordsNumber = 20, SortBy = "ServiceDate", SortDir = "desc" };
+    _ = Reload();
+  }
+
+  private async Task OnPageChanged(int page)
+  {
+    _pagination.Page = page;
+    await Reload();
+  }
+
+  private async Task OnPageSizeChanged(int size)
+  {
+    _pagination.RecordsNumber = size;
+    _pagination.Page = 1;
+    await Reload();
+  }
+
+  // ========= Crear oferta desde la fila =========
+  bool CanCreateOffer(CapacityRequest cr)
+  {
+    // Permitir crear oferta cuando el req está Abierto o En Cotización
+    var okEstado = cr.Status is CapacityReqStatus.Open or CapacityReqStatus.Quoted;
+    if (!okEstado) return false;
+
+    // Si es visible sólo para un proveedor, respeta la visibilidad (salvo admin)
+    if (cr.OnlyTargetProvider && cr.ProviderId != _currentProviderId && !IsAdmin)
+      return false;
+
+    return true;
+  }
+
+  async Task OpenCreateOffer(CapacityRequest cr)
+  {
+    var providerId = IsAdmin ? (_selectedProvider?.Id ?? _currentProviderId) : _currentProviderId;
+
+    var parameters = new DialogParameters {
+      { nameof(OfferDialog.CapacityRequestId), cr.Id },
+      { nameof(OfferDialog.ProviderId), providerId }
+    };
+    var options = new DialogOptions { MaxWidth = MaxWidth.Medium, CloseOnEscapeKey = true };
+
+    var dialog = Dialog.Show<OfferDialog>($"Nueva oferta · Req #{cr.Id}", parameters, options);
+    var result = await dialog.Result;
+    if (!result.Canceled)
+      Snackbar.Add("Oferta creada.", Severity.Success);
+  }
+
+  // ========= Autocomplete (ADMIN) =========
+  private async Task<IEnumerable<Provider>> SearchProviders(string value, CancellationToken ct)
+  {
+    var page = await ProvidersApi.GetPagedAsync(
+      term: string.IsNullOrWhiteSpace(value) ? null : value,
+      page: 1, recordsNumber: 10, sortBy: "Name", sortDir: "asc", cancellationToken: ct);
+    ct.ThrowIfCancellationRequested();
+    return page?.Items ?? Enumerable.Empty<Provider>();
+  }
+
+  private static string ProviderToString(Provider? p)
+    => p is null ? string.Empty : $"{p.Name} (#{p.Id})";
+
+  // ========= Etiquetas y colores =========
+  static string StatusLabel(CapacityReqStatus s)
+  {
+    var mem = typeof(CapacityReqStatus).GetMember(s.ToString()).FirstOrDefault();
+    var desc = mem?.GetCustomAttributes(typeof(DescriptionAttribute), false)
+                  .Cast<DescriptionAttribute>()
+                  .FirstOrDefault()?.Description;
+    return string.IsNullOrWhiteSpace(desc) ? s.ToString() : desc!;
+  }
+
+  static Color ChipColor(CapacityReqStatus status) => status switch
+  {
+    CapacityReqStatus.Open              => Color.Info,     // Abierta
+    CapacityReqStatus.Quoted            => Color.Warning,  // En cotización
+    CapacityReqStatus.Awarded           => Color.Success,  // Adjudicada
+    CapacityReqStatus.PartiallyAwarded  => Color.Secondary,// Parcialmente adjudicada
+    CapacityReqStatus.Closed            => Color.Dark,     // Cerrada
+    CapacityReqStatus.Expired           => Color.Dark,     // Vencida
+    CapacityReqStatus.Cancelled         => Color.Error,    // Cancelada
+    _ => Color.Default
+  };
+}

@@ -141,6 +141,10 @@ using (var scope = app.Services.CreateScope())
     var dataContext = services.GetRequiredService<DataContext>();
     await dataContext.Database.MigrateAsync();
 
+    // --- FIX índices de VehicleOffers (idempotente) ---
+
+    // --- FIN FIX ---
+
     // Seed de roles/usuarios (usa Admin.Email/Password del appsettings)
     await SeedIdentity.RunAsync(services);
 

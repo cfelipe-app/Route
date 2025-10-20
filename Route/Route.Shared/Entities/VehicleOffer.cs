@@ -20,17 +20,26 @@ namespace Route.Shared.Entities
         public int ProviderId { get; set; }
         public Provider Provider { get; set; } = null!;
 
-        public int VehicleId { get; set; }
-        public Vehicle Vehicle { get; set; } = null!;
+        // Placa específica (opcional)
+        public int? VehicleId { get; set; }
 
+        public Vehicle? Vehicle { get; set; }
+
+        // ===== Campos “legado” del encabezado (compatibilidad) =====
+        // Puedes seguir mostrándolos en la grilla actual; al crear/editar
+        // el backend los usará para generar la línea 1 si no envías Lines.
+
+        public int Quantity { get; set; } = 1;
         public double OfferedWeightKg { get; set; }
         public double OfferedVolumeM3 { get; set; }
 
         [Column(TypeName = "decimal(18,2)")]
-        public decimal Price { get; set; }
+        public decimal Price { get; set; }                 // precio “línea 1”
 
-        [Required, MaxLength(10)]
+        [Required, MaxLength(3)]
         public string Currency { get; set; } = "PEN";
+
+        public PriceMode PriceMode { get; set; } = PriceMode.PerVehicle;
 
         public VehicleOfferStatus Status { get; set; } = VehicleOfferStatus.Draft;
 
@@ -38,12 +47,14 @@ namespace Route.Shared.Entities
         public string? Notes { get; set; }
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime? ValidUntil { get; set; }
 
-        // Timestamp de la decisión
         public DateTime? DecisionAt { get; set; }
 
-        // (Opcional, si también quieres guardar quién decide)
         [MaxLength(80)]
         public string? DecidedBy { get; set; }
+
+        // ===== NUEVO: líneas de servicio =====
+        public ICollection<VehicleOfferLine> Lines { get; set; } = new List<VehicleOfferLine>();
     }
 }

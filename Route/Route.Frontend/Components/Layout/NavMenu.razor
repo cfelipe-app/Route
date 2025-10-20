@@ -1,4 +1,4 @@
-﻿
+﻿@* 
 <MudNavMenu>
     <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">Dashboard</MudNavLink>
     <MudNavLink Href="/admin/vehicles" Icon="@Icons.Material.Filled.DirectionsCar">Vehículos</MudNavLink>
@@ -9,6 +9,41 @@
     <MudNavLink Href="/admin/providers" Icon="@Icons.Material.Filled.LocalShipping">Proveedor</MudNavLink>
     
 
+</MudNavMenu> *@
+@code {
+
+    // mientras no tengas auth real
+    bool IsAdmin = true;      // simula admin
+
+    bool IsProvider => !IsAdmin;
+}
+
+<MudNavMenu>
+    <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">Dashboard</MudNavLink>
+
+    <!-- Operación (común) -->
+    <MudNavLink Href="/routes" Icon="@Icons.Material.Filled.Route">Rutas</MudNavLink>
+    <MudNavLink Href="/orders" Icon="@Icons.Material.Filled.Assignment">Pedidos</MudNavLink>
+    <MudNavLink Href="/reports" Icon="@Icons.Material.Filled.Assessment">Reportes</MudNavLink>
+
+    <!-- Catálogos -->
+    <MudNavLink Href="/admin/vehicles" Icon="@Icons.Material.Filled.DirectionsCar">Vehículos</MudNavLink>
+    <MudNavLink Href="/admin/providers" Icon="@Icons.Material.Filled.LocalShipping">Proveedores</MudNavLink>
+    <MudNavLink Href="/configuration" Icon="@Icons.Material.Filled.Settings">Configuración</MudNavLink>
+
+   @*  @if (IsProvider)
+    { *@
+        <!-- Vista proveedor -->
+        <MudNavLink Href="/provider/requests" Icon="@Icons.Material.Filled.ListAlt">Requerimientos</MudNavLink>
+        <MudNavLink Href="/provider/my-offers" Icon="@Icons.Material.Filled.LocalOffer">Mis ofertas</MudNavLink>
+   @*  } *@
+
+   @*  @if (IsAdmin)
+    { *@
+        <!-- Vista admin -->
+        <MudNavLink Href="/admin/requests" Icon="@Icons.Material.Filled.ListAlt">Requerimientos</MudNavLink>
+        <MudNavLink Href="/admin/offers" Icon="@Icons.Material.Filled.LocalOffer">Ofertas</MudNavLink>
+   @*  } *@
 </MudNavMenu>
 
 

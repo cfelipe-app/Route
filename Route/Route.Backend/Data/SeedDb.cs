@@ -30,15 +30,17 @@ namespace Route.Backend.Data
 
             await UpsertProvidersAsync(cancellationToken);
             await UpsertVehiclesAsync(cancellationToken);
+            await UpsertDriversAsync(cancellationToken);              // <<< NUEVO
             await UpsertOrdersAsync(cancellationToken);
             await UpsertCapacityRequestsAsync(cancellationToken);
-            await UpsertVehicleOffersAsync(cancellationToken);
-            await UpsertRoutePlanDemoAsync(cancellationToken);
+            await UpsertVehicleOffersAsync(cancellationToken);        // ajustado para dejar una aceptada con VehicleId
+            await UpsertRoutePlanDemoAsync(cancellationToken);        // ajustado para asignar driver si hay
 
             _logger.LogInformation(
-                "Seed OK: Providers={Providers} Vehicles={Vehicles} Orders={Orders} CapacityRequests={CapacityRequests} Offers={Offers} Routes={Routes}",
+                "Seed OK: Providers={Providers} Vehicles={Vehicles} Drivers={Drivers} Orders={Orders} CapacityRequests={CapacityRequests} Offers={Offers} Routes={Routes}",
                 await _dataContext.Providers.CountAsync(cancellationToken),
                 await _dataContext.Vehicles.CountAsync(cancellationToken),
+                await _dataContext.Drivers.CountAsync(cancellationToken),                 // <<< NUEVO
                 await _dataContext.Orders.CountAsync(cancellationToken),
                 await _dataContext.CapacityRequests.CountAsync(cancellationToken),
                 await _dataContext.VehicleOffers.CountAsync(cancellationToken),
@@ -65,6 +67,7 @@ namespace Route.Backend.Data
             await _dataContext.CapacityRequests.ExecuteDeleteAsync(cancellationToken);
             await _dataContext.Orders.ExecuteDeleteAsync(cancellationToken);
             await _dataContext.Vehicles.ExecuteDeleteAsync(cancellationToken);
+            await _dataContext.Drivers.ExecuteDeleteAsync(cancellationToken);  // <<< NUEVO (depende de Provider)
             await _dataContext.Providers.ExecuteDeleteAsync(cancellationToken);
 
             await transaction.CommitAsync(cancellationToken);
@@ -156,6 +159,50 @@ namespace Route.Backend.Data
             await _dataContext.SaveChangesAsync(cancellationToken);
         }
 
+        // ---------- NUEVO: Conductores ----------
+        private async Task UpsertDriversAsync(CancellationToken cancellationToken)
+        {
+            var providers = await _dataContext.Providers.AsNoTracking().ToListAsync(cancellationToken);
+            if (providers.Count == 0) return;
+
+            foreach (var p in providers)
+            {
+                var drivers = new[]
+                {
+                new Driver {
+                    ProviderId = p.Id, FullName = "Juan Pérez",
+                    DocumentId = $"DNI-{p.Id}01", Phone = "999111222",
+                    LicenseNumber = $"A-{p.Id}01", LicenseClass = "A-IIb", IsActive = true
+                },
+                new Driver {
+                    ProviderId = p.Id, FullName = "Ana Gómez",
+                    DocumentId = $"DNI-{p.Id}02", Phone = "999333444",
+                    LicenseNumber = $"A-{p.Id}02", LicenseClass = "A-IIIc", IsActive = true
+                }
+            };
+
+                foreach (var d in drivers)
+                {
+                    var existing = await _dataContext.Drivers
+                        .FirstOrDefaultAsync(x => x.ProviderId == d.ProviderId && x.DocumentId == d.DocumentId, cancellationToken);
+
+                    if (existing is null)
+                        _dataContext.Drivers.Add(d);
+                    else
+                    {
+                        existing.FullName = d.FullName;
+                        existing.Phone = d.Phone;
+                        existing.Email = d.Email;
+                        existing.LicenseNumber = d.LicenseNumber;
+                        existing.LicenseClass = d.LicenseClass;
+                        existing.IsActive = d.IsActive;
+                    }
+                }
+            }
+
+            await _dataContext.SaveChangesAsync(cancellationToken);
+        }
+
         private static decimal RoundDecimal(double value, int decimals) =>
             Math.Round((decimal)value, decimals);
 
@@ -183,7 +230,6 @@ namespace Route.Backend.Data
             string[] paymentMethods = { "CONTADO", "CREDITO", "LETRAS" };
 
             double RandomGeographicJitter() => (random.NextDouble() - 0.5) * 0.01; // +/- 0.005
-
             string NextRandomTaxId() => $"{random.Next(10, 99)}{random.Next(100000000, 999999999)}";
 
             var ordersToUpsert = new List<Order>();
@@ -236,7 +282,6 @@ namespace Route.Backend.Data
                 }
                 else
                 {
-                    // Actualizamos campos “de negocio”
                     existingOrder.CustomerName = orderCandidate.CustomerName;
                     existingOrder.Address = orderCandidate.Address;
                     existingOrder.District = orderCandidate.District;
@@ -248,7 +293,6 @@ namespace Route.Backend.Data
                     existingOrder.Latitude = orderCandidate.Latitude;
                     existingOrder.Longitude = orderCandidate.Longitude;
                     existingOrder.ScheduledDate = orderCandidate.ScheduledDate;
-                    // Mantenemos el estado actual si ya cambió durante pruebas.
                 }
             }
 
@@ -336,19 +380,24 @@ namespace Route.Backend.Data
                         x => x.CapacityRequestId == capacityRequestToday.Id && x.VehicleId == vehicle.Id,
                         cancellationToken);
 
+                var price = (decimal)(600 + random.Next(0, 500));
+
                 if (existingOffer is null)
                 {
                     _dataContext.VehicleOffers.Add(new VehicleOffer
                     {
                         CapacityRequestId = capacityRequestToday.Id,
                         ProviderId = vehicle.ProviderId,
-                        VehicleId = vehicle.Id,
+                        VehicleId = vehicle.Id,                           // <<< placa concreta
+                        Quantity = 1,
                         OfferedWeightKg = offeredWeightKg,
                         OfferedVolumeM3 = offeredVolumeM3,
-                        Price = (decimal)(600 + random.Next(0, 500)),
+                        Price = price,
                         Currency = "PEN",
+                        PriceMode = PriceMode.PerVehicle,
                         Status = VehicleOfferStatus.Draft,
                         Notes = "Oferta automática (seed)",
+                        ValidUntil = serviceDateToday.AddHours(19),
                         DecisionAt = null,
                         DecidedBy = null
                     });
@@ -357,41 +406,76 @@ namespace Route.Backend.Data
                 {
                     existingOffer.OfferedWeightKg = offeredWeightKg;
                     existingOffer.OfferedVolumeM3 = offeredVolumeM3;
-                    existingOffer.Price = (decimal)(600 + random.Next(0, 500));
+                    existingOffer.Price = price;
                     existingOffer.Status = VehicleOfferStatus.Draft;
                     existingOffer.Notes = "Oferta automática (seed)";
+                    existingOffer.ValidUntil = serviceDateToday.AddHours(19);
                     existingOffer.DecisionAt = null;
                     existingOffer.DecidedBy = null;
                 }
             }
 
-            // Garantiza al menos una oferta aceptada para construir la ruta de demostración.
-            var firstOfferForToday = await _dataContext.VehicleOffers
-                .Where(x => x.CapacityRequestId == capacityRequestToday.Id)
+            await _dataContext.SaveChangesAsync(cancellationToken);
+
+            // Asegura al menos UNA oferta aceptada con VehicleId para la demo
+            var firstWithVehicle = await _dataContext.VehicleOffers
+                .Where(x => x.CapacityRequestId == capacityRequestToday.Id && x.VehicleId != null)
                 .OrderBy(x => x.Id)
                 .FirstOrDefaultAsync(cancellationToken);
 
-            if (firstOfferForToday is not null)
-                firstOfferForToday.Status = VehicleOfferStatus.Accepted;
-
-            await _dataContext.SaveChangesAsync(cancellationToken);
+            if (firstWithVehicle is not null)
+            {
+                firstWithVehicle.Status = VehicleOfferStatus.Accepted;
+                firstWithVehicle.DecisionAt = DateTime.UtcNow;
+                firstWithVehicle.DecidedBy = "seed";
+                await _dataContext.SaveChangesAsync(cancellationToken);
+            }
         }
 
         private async Task UpsertRoutePlanDemoAsync(CancellationToken cancellationToken)
         {
             var serviceDateToday = DateTime.Today;
 
+            // Busca una oferta ACEPTADA para HOY (por ServiceDate del CR)
             var acceptedOffer = await _dataContext.VehicleOffers
                 .Include(o => o.Vehicle)
-                .Where(o => o.Status == VehicleOfferStatus.Accepted)
+                .Include(o => o.CapacityRequest)
+                .Where(o => o.Status == VehicleOfferStatus.Accepted
+                            && o.CapacityRequest.ServiceDate == serviceDateToday
+                            && o.VehicleId != null)                     // <<< importante
                 .OrderBy(o => o.Id)
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (acceptedOffer is null)
+            {
+                _logger.LogInformation("Seed: no hay ofertas aceptadas con vehículo para {Date}", serviceDateToday);
                 return;
+            }
 
+            // Asegura vehículo (por si la navegación falló)
             var selectedVehicle = acceptedOffer.Vehicle;
-            var routeCode = $"{selectedVehicle.Plate}-01";
+            if (selectedVehicle is null && acceptedOffer.VehicleId is int vid)
+            {
+                selectedVehicle = await _dataContext.Vehicles
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(v => v.Id == vid, cancellationToken);
+            }
+            if (selectedVehicle is null)
+            {
+                _logger.LogWarning("Seed: la oferta aceptada #{OfferId} no tiene vehículo cargado/valido.", acceptedOffer.Id);
+                return;
+            }
+
+            // Driver del mismo proveedor (si existe)
+            int? driverId = await _dataContext.Drivers
+                .Where(d => d.ProviderId == selectedVehicle.ProviderId && d.IsActive)
+                .OrderBy(d => d.Id)
+                .Select(d => (int?)d.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            var routeCode = !string.IsNullOrWhiteSpace(selectedVehicle.Plate)
+                ? $"{selectedVehicle.Plate}-01"
+                : $"V{selectedVehicle.Id:0000}-01";
 
             var existingRoutePlan = await _dataContext.RoutePlans
                 .FirstOrDefaultAsync(r => r.ServiceDate == serviceDateToday && r.Code == routeCode, cancellationToken);
@@ -403,6 +487,7 @@ namespace Route.Backend.Data
                     ServiceDate = serviceDateToday,
                     VehicleId = selectedVehicle.Id,
                     ProviderId = selectedVehicle.ProviderId,
+                    DriverId = driverId,                                 // <<< asigna conductor si hay
                     Code = routeCode,
                     Status = RouteStatus.Planned,
                     StartTime = serviceDateToday.AddHours(9),
@@ -416,7 +501,7 @@ namespace Route.Backend.Data
                 await _dataContext.SaveChangesAsync(cancellationToken);
             }
 
-            // Asegura 5 pedidos asignados a la ruta de demostración
+            // Asegura 5 pedidos asignados de demo
             var alreadyAssignedCount = await _dataContext.RouteOrders
                 .Where(ro => ro.RouteId == existingRoutePlan.Id)
                 .CountAsync(cancellationToken);
@@ -432,7 +517,7 @@ namespace Route.Backend.Data
                     .Take(pendingToAssign)
                     .ToListAsync(cancellationToken);
 
-                int nextSequence = alreadyAssignedCount;
+                int nextSeq = alreadyAssignedCount;
 
                 foreach (var order in availableOrders)
                 {
@@ -440,8 +525,8 @@ namespace Route.Backend.Data
                     {
                         RouteId = existingRoutePlan.Id,
                         OrderId = order.Id,
-                        StopSequence = ++nextSequence,
-                        ETA = serviceDateToday.AddHours(9).AddMinutes(15 * nextSequence),
+                        StopSequence = ++nextSeq,
+                        ETA = serviceDateToday.AddHours(9).AddMinutes(15 * nextSeq),
                         DeliveryStatus = DeliveryStatus.Pending
                     });
 

@@ -279,20 +279,26 @@ namespace Route.Backend.Migrations
                         .Annotation("SqlServer:Identity", "1, 1"),
                     CapacityRequestId = table.Column<int>(type: "int", nullable: false),
                     ProviderId = table.Column<int>(type: "int", nullable: false),
-                    VehicleId = table.Column<int>(type: "int", nullable: false),
-                    OfferedWeightKg = table.Column<double>(type: "float", nullable: false),
-                    OfferedVolumeM3 = table.Column<double>(type: "float", nullable: false),
+                    VehicleId = table.Column<int>(type: "int", nullable: true),
+                    Quantity = table.Column<int>(type: "int", nullable: false),
+                    OfferedWeightKg = table.Column<double>(type: "float(18)", precision: 18, scale: 3, nullable: false),
+                    OfferedVolumeM3 = table.Column<double>(type: "float(18)", precision: 18, scale: 3, nullable: false),
                     Price = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: false),
-                    Currency = table.Column<string>(type: "nvarchar(10)", maxLength: 10, nullable: false, defaultValue: "PEN"),
+                    Currency = table.Column<string>(type: "nvarchar(3)", maxLength: 3, nullable: false, defaultValue: "PEN"),
+                    PriceMode = table.Column<string>(type: "nvarchar(12)", maxLength: 12, nullable: false, defaultValue: "PerVehicle"),
                     Status = table.Column<string>(type: "nvarchar(20)", maxLength: 20, nullable: false),
                     Notes = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: true),
                     CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false, defaultValueSql: "GETUTCDATE()"),
+                    ValidUntil = table.Column<DateTime>(type: "datetime2", nullable: true),
                     DecisionAt = table.Column<DateTime>(type: "datetime2", nullable: true),
                     DecidedBy = table.Column<string>(type: "nvarchar(80)", maxLength: 80, nullable: true)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_VehicleOffers", x => x.Id);
+                    table.CheckConstraint("CK_VehicleOffers_Price_NonNegative", "Price >= 0");
+                    table.CheckConstraint("CK_VehicleOffers_Quantity_Positive", "Quantity >= 1");
+                    table.CheckConstraint("CK_VehicleOffers_WeightsVolumes_NonNegative", "OfferedWeightKg >= 0 AND OfferedVolumeM3 >= 0");
                     table.ForeignKey(
                         name: "FK_VehicleOffers_CapacityRequests_CapacityRequestId",
                         column: x => x.CapacityRequestId,
@@ -428,6 +434,31 @@ namespace Route.Backend.Migrations
                         onDelete: ReferentialAction.Restrict);
                 });
 
+            migrationBuilder.CreateTable(
+                name: "VehicleOfferLines",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "int", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    OfferId = table.Column<int>(type: "int", nullable: false),
+                    Seq = table.Column<int>(type: "int", nullable: false),
+                    ServiceDate = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    WindowStart = table.Column<TimeSpan>(type: "time", nullable: false),
+                    WindowEnd = table.Column<TimeSpan>(type: "time", nullable: false),
+                    Price = table.Column<decimal>(type: "decimal(18,2)", precision: 18, scale: 2, nullable: false),
+                    Notes = table.Column<string>(type: "nvarchar(300)", maxLength: 300, nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_VehicleOfferLines", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_VehicleOfferLines_VehicleOffers_OfferId",
+                        column: x => x.OfferId,
+                        principalTable: "VehicleOffers",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
             migrationBuilder.CreateIndex(
                 name: "IX_AspNetRoleClaims_RoleId",
                 table: "AspNetRoleClaims",
@@ -478,14 +509,24 @@ namespace Route.Backend.Migrations
                 filter: "[NormalizedUserName] IS NOT NULL");
 
             migrationBuilder.CreateIndex(
-                name: "IX_CapacityRequests_ProviderId",
+                name: "IX_CapacityRequests_ProviderId_OnlyTargetProvider",
                 table: "CapacityRequests",
-                column: "ProviderId");
+                columns: new[] { "ProviderId", "OnlyTargetProvider" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_CapacityRequests_ServiceDate",
+                table: "CapacityRequests",
+                column: "ServiceDate");
 
             migrationBuilder.CreateIndex(
                 name: "IX_CapacityRequests_ServiceDate_ProviderId",
                 table: "CapacityRequests",
                 columns: new[] { "ServiceDate", "ProviderId" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_CapacityRequests_Status",
+                table: "CapacityRequests",
+                column: "Status");
 
             migrationBuilder.CreateIndex(
                 name: "IX_Drivers_ProviderId_DocumentId",
@@ -560,15 +601,21 @@ namespace Route.Backend.Migrations
                 column: "VehicleId");
 
             migrationBuilder.CreateIndex(
+                name: "IX_VehicleOfferLines_OfferId_Seq",
+                table: "VehicleOfferLines",
+                columns: new[] { "OfferId", "Seq" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_VehicleOffers_ByRequestProvider_Aggregated",
+                table: "VehicleOffers",
+                columns: new[] { "CapacityRequestId", "ProviderId" },
+                filter: "[VehicleId] IS NULL");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_VehicleOffers_CapacityRequestId_Status",
                 table: "VehicleOffers",
                 columns: new[] { "CapacityRequestId", "Status" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_VehicleOffers_CapacityRequestId_VehicleId",
-                table: "VehicleOffers",
-                columns: new[] { "CapacityRequestId", "VehicleId" },
-                unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "IX_VehicleOffers_ProviderId",
@@ -579,6 +626,13 @@ namespace Route.Backend.Migrations
                 name: "IX_VehicleOffers_VehicleId",
                 table: "VehicleOffers",
                 column: "VehicleId");
+
+            migrationBuilder.CreateIndex(
+                name: "UX_VehicleOffers_ByRequestVehicle",
+                table: "VehicleOffers",
+                columns: new[] { "CapacityRequestId", "VehicleId" },
+                unique: true,
+                filter: "[VehicleId] IS NOT NULL");
 
             migrationBuilder.CreateIndex(
                 name: "IX_Vehicles_Plate",
@@ -614,7 +668,7 @@ namespace Route.Backend.Migrations
                 name: "RouteOrders");
 
             migrationBuilder.DropTable(
-                name: "VehicleOffers");
+                name: "VehicleOfferLines");
 
             migrationBuilder.DropTable(
                 name: "AspNetRoles");
@@ -629,10 +683,13 @@ namespace Route.Backend.Migrations
                 name: "RoutePlans");
 
             migrationBuilder.DropTable(
-                name: "CapacityRequests");
+                name: "VehicleOffers");
 
             migrationBuilder.DropTable(
                 name: "Drivers");
+
+            migrationBuilder.DropTable(
+                name: "CapacityRequests");
 
             migrationBuilder.DropTable(
                 name: "Vehicles");

@@ -24,6 +24,11 @@ builder.Services.AddHttpClient<ProvidersClient>(c =>
 builder.Services.AddHttpClient<VehiclesClient>(c =>
     c.BaseAddress = new Uri(builder.Configuration["ApiBaseUrl"] ?? "https://localhost:7241"));
 
+builder.Services.AddHttpClient<VehicleOffersClient>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["ApiBaseUrl"] ?? "https://localhost:7241"));
+builder.Services.AddHttpClient<CapacityRequestsClient>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["ApiBaseUrl"] ?? "https://localhost:7241"));
+
 //builder.Services.AddHttpClient<ProvidersClient>(c =>
 //    c.BaseAddress = new Uri(builder.Configuration["ApiBaseUrl"]!));
 

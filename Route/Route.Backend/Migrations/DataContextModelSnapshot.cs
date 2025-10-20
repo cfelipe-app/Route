@@ -286,7 +286,11 @@ namespace Route.Backend.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ProviderId");
+                    b.HasIndex("ServiceDate");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("ProviderId", "OnlyTargetProvider");
 
                     b.HasIndex("ServiceDate", "ProviderId");
 
@@ -702,8 +706,8 @@ namespace Route.Backend.Migrations
                     b.Property<string>("Currency")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
-                        .HasMaxLength(10)
-                        .HasColumnType("nvarchar(10)")
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)")
                         .HasDefaultValue("PEN");
 
                     b.Property<string>("DecidedBy")
@@ -718,16 +722,28 @@ namespace Route.Backend.Migrations
                         .HasColumnType("nvarchar(500)");
 
                     b.Property<double>("OfferedVolumeM3")
-                        .HasColumnType("float");
+                        .HasPrecision(18, 3)
+                        .HasColumnType("float(18)");
 
                     b.Property<double>("OfferedWeightKg")
-                        .HasColumnType("float");
+                        .HasPrecision(18, 3)
+                        .HasColumnType("float(18)");
 
                     b.Property<decimal>("Price")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<string>("PriceMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(12)
+                        .HasColumnType("nvarchar(12)")
+                        .HasDefaultValue("PerVehicle");
+
                     b.Property<int>("ProviderId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Quantity")
                         .HasColumnType("int");
 
                     b.Property<string>("Status")
@@ -735,7 +751,10 @@ namespace Route.Backend.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
-                    b.Property<int>("VehicleId")
+                    b.Property<DateTime?>("ValidUntil")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("VehicleId")
                         .HasColumnType("int");
 
                     b.HasKey("Id");
@@ -744,12 +763,64 @@ namespace Route.Backend.Migrations
 
                     b.HasIndex("VehicleId");
 
+                    b.HasIndex("CapacityRequestId", "ProviderId")
+                        .HasDatabaseName("IX_VehicleOffers_ByRequestProvider_Aggregated")
+                        .HasFilter("[VehicleId] IS NULL");
+
                     b.HasIndex("CapacityRequestId", "Status");
 
                     b.HasIndex("CapacityRequestId", "VehicleId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_VehicleOffers_ByRequestVehicle")
+                        .HasFilter("[VehicleId] IS NOT NULL");
+
+                    b.ToTable("VehicleOffers", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_VehicleOffers_Price_NonNegative", "Price >= 0");
+
+                            t.HasCheckConstraint("CK_VehicleOffers_Quantity_Positive", "Quantity >= 1");
+
+                            t.HasCheckConstraint("CK_VehicleOffers_WeightsVolumes_NonNegative", "OfferedWeightKg >= 0 AND OfferedVolumeM3 >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("Route.Shared.Entities.VehicleOfferLine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<int>("OfferId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Price")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("Seq")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("ServiceDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<TimeSpan>("WindowEnd")
+                        .HasColumnType("time");
+
+                    b.Property<TimeSpan>("WindowStart")
+                        .HasColumnType("time");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OfferId", "Seq")
                         .IsUnique();
 
-                    b.ToTable("VehicleOffers", (string)null);
+                    b.ToTable("VehicleOfferLines", (string)null);
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<string>", b =>
@@ -912,14 +983,24 @@ namespace Route.Backend.Migrations
                     b.HasOne("Route.Shared.Entities.Vehicle", "Vehicle")
                         .WithMany()
                         .HasForeignKey("VehicleId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("CapacityRequest");
 
                     b.Navigation("Provider");
 
                     b.Navigation("Vehicle");
+                });
+
+            modelBuilder.Entity("Route.Shared.Entities.VehicleOfferLine", b =>
+                {
+                    b.HasOne("Route.Shared.Entities.VehicleOffer", "Offer")
+                        .WithMany("Lines")
+                        .HasForeignKey("OfferId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Offer");
                 });
 
             modelBuilder.Entity("Route.Shared.Entities.CapacityRequest", b =>
@@ -952,6 +1033,11 @@ namespace Route.Backend.Migrations
             modelBuilder.Entity("Route.Shared.Entities.Vehicle", b =>
                 {
                     b.Navigation("Routes");
+                });
+
+            modelBuilder.Entity("Route.Shared.Entities.VehicleOffer", b =>
+                {
+                    b.Navigation("Lines");
                 });
 #pragma warning restore 612, 618
         }

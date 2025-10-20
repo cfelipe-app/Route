@@ -8,22 +8,53 @@ using System.Threading.Tasks;
 
 namespace Route.Shared.Entities
 {
+    //public class CapacityRequest : IEntityWithId
+    //{
+    //    public int Id { get; set; }
+    //    public int? ProviderId { get; set; }
+    //    public Provider? Provider { get; set; }
+    //    public bool OnlyTargetProvider { get; set; } = false;
+    //    public DateTime ServiceDate { get; set; }
+    //    public string? Zone { get; set; }
+    //    public double DemandWeightKg { get; set; }
+    //    public double DemandVolumeM3 { get; set; }
+    //    public int DemandStops { get; set; }
+    //    public TimeSpan? WindowStart { get; set; }
+    //    public TimeSpan? WindowEnd { get; set; }
+    //    public CapacityReqStatus Status { get; set; } = CapacityReqStatus.Open;
+    //    public string? CreatedBy { get; set; }
+    //    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    //    public ICollection<VehicleOffer> Offers { get; set; } = new List<VehicleOffer>();
+    //}
+
     public class CapacityRequest : IEntityWithId
     {
         public int Id { get; set; }
+
+        // Si OnlyTargetProvider=true => solo este proveedor ve y oferta.
+        // Si OnlyTargetProvider=false && ProviderId==null => Broadcast.
         public int? ProviderId { get; set; }
+
         public Provider? Provider { get; set; }
         public bool OnlyTargetProvider { get; set; } = false;
+
         public DateTime ServiceDate { get; set; }
         public string? Zone { get; set; }
+
+        // Demanda agregada estimada (puedes usar una u otra como “driver”)
         public double DemandWeightKg { get; set; }
+
         public double DemandVolumeM3 { get; set; }
         public int DemandStops { get; set; }
+
         public TimeSpan? WindowStart { get; set; }
         public TimeSpan? WindowEnd { get; set; }
+
         public CapacityReqStatus Status { get; set; } = CapacityReqStatus.Open;
+
         public string? CreatedBy { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
         public ICollection<VehicleOffer> Offers { get; set; } = new List<VehicleOffer>();
     }
 }

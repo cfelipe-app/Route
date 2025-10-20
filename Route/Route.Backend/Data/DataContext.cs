@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Route.Backend.Identity;
 using Route.Shared.Entities;
+using Route.Shared.Enums;
 
 namespace Route.Backend.Data
 {
@@ -22,6 +23,7 @@ namespace Route.Backend.Data
         public DbSet<CapacityRequest> CapacityRequests => Set<CapacityRequest>();
         public DbSet<VehicleOffer> VehicleOffers => Set<VehicleOffer>();
         public DbSet<Driver> Drivers => Set<Driver>();                // <<< NUEVO
+        public DbSet<VehicleOfferLine> VehicleOfferLines => Set<VehicleOfferLine>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -177,7 +179,11 @@ namespace Route.Backend.Data
                     .HasForeignKey(cr => cr.ProviderId)
                     .OnDelete(DeleteBehavior.Restrict);
 
+                // Índices útiles para filtros y visibilidad
+                e.HasIndex(cr => cr.ServiceDate);
+                e.HasIndex(cr => cr.Status);
                 e.HasIndex(cr => new { cr.ServiceDate, cr.ProviderId });
+                e.HasIndex(cr => new { cr.ProviderId, cr.OnlyTargetProvider });
 
                 e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
             });
@@ -187,34 +193,80 @@ namespace Route.Backend.Data
             {
                 e.ToTable("VehicleOffers");
 
+                // Básicos
                 e.Property(x => x.Price).HasPrecision(18, 2);
-                e.Property(x => x.Currency).IsRequired().HasMaxLength(10).HasDefaultValue("PEN");
+                e.Property(x => x.Currency).IsRequired().HasMaxLength(3).HasDefaultValue("PEN");
                 e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+                e.Property(x => x.PriceMode).HasConversion<string>().HasMaxLength(12).HasDefaultValue(PriceMode.PerVehicle);
                 e.Property(x => x.Notes).HasMaxLength(500);
                 e.Property(x => x.CreatedAt).HasDefaultValueSql("GETUTCDATE()");
-
-                // Campos de decisión
-                e.Property(x => x.DecisionAt).HasColumnType("datetime2").IsRequired(false);
+                e.Property(x => x.ValidUntil).HasColumnType("datetime2");
+                e.Property(x => x.DecisionAt).HasColumnType("datetime2");
                 e.Property(x => x.DecidedBy).HasMaxLength(80);
 
+                // Capacidades con precisión
+                e.Property(x => x.OfferedWeightKg).HasPrecision(18, 3);
+                e.Property(x => x.OfferedVolumeM3).HasPrecision(18, 3);
+
+                // Relaciones
                 e.HasOne(x => x.CapacityRequest)
-                    .WithMany(cr => cr.Offers)
-                    .HasForeignKey(x => x.CapacityRequestId)
-                    .OnDelete(DeleteBehavior.Restrict);
+                 .WithMany(cr => cr.Offers)
+                 .HasForeignKey(x => x.CapacityRequestId)
+                 .OnDelete(DeleteBehavior.Restrict);
 
                 e.HasOne(x => x.Provider)
-                    .WithMany()
-                    .HasForeignKey(x => x.ProviderId)
-                    .OnDelete(DeleteBehavior.Restrict);
+                 .WithMany()
+                 .HasForeignKey(x => x.ProviderId)
+                 .OnDelete(DeleteBehavior.Restrict);
 
                 e.HasOne(x => x.Vehicle)
-                    .WithMany()
-                    .HasForeignKey(x => x.VehicleId)
-                    .OnDelete(DeleteBehavior.Restrict);
+                 .WithMany()
+                 .HasForeignKey(x => x.VehicleId)
+                 .OnDelete(DeleteBehavior.Restrict);
 
-                e.HasIndex(x => new { x.CapacityRequestId, x.VehicleId }).IsUnique();
+                // Índices útiles
                 e.HasIndex(x => x.ProviderId);
-                e.HasIndex(x => new { x.CapacityRequestId, x.Status }); // consultas por estado
+                e.HasIndex(x => new { x.CapacityRequestId, x.Status });
+
+                // --- REGLA DE NEGOCIO DE UNICIDAD ---
+                // 1) Único por (CapacityRequestId, VehicleId) cuando hay placa:
+                e.HasIndex(x => new { x.CapacityRequestId, x.VehicleId })
+                 .IsUnique()
+                 .HasDatabaseName("UX_VehicleOffers_ByRequestVehicle")
+                 .HasFilter("[VehicleId] IS NOT NULL");
+
+                // 2) (ANTES era único). Ahora: índice normal para consultas o elimínalo si no lo usas.
+                e.HasIndex(x => new { x.CapacityRequestId, x.ProviderId })
+                 .HasDatabaseName("IX_VehicleOffers_ByRequestProvider_Aggregated")
+                 .HasFilter("[VehicleId] IS NULL");
+
+                // Check constraints para datos sanos
+                e.ToTable(tb =>
+                {
+                    tb.HasCheckConstraint("CK_VehicleOffers_Quantity_Positive", "Quantity >= 1");
+                    tb.HasCheckConstraint("CK_VehicleOffers_Price_NonNegative", "Price >= 0");
+                    tb.HasCheckConstraint("CK_VehicleOffers_WeightsVolumes_NonNegative",
+                                          "OfferedWeightKg >= 0 AND OfferedVolumeM3 >= 0");
+                });
+
+                e.HasMany(o => o.Lines)
+                 .WithOne(l => l.Offer)
+                 .HasForeignKey(l => l.OfferId);
+            });
+
+            // ================= VehicleOfferLine (NUEVO) =================
+            modelBuilder.Entity<VehicleOfferLine>(e =>
+            {
+                e.ToTable("VehicleOfferLines");
+
+                e.Property(x => x.Seq).IsRequired();
+                e.Property(x => x.ServiceDate).IsRequired();
+                e.Property(x => x.WindowStart).HasColumnType("time");
+                e.Property(x => x.WindowEnd).HasColumnType("time");
+                e.Property(x => x.Price).HasPrecision(18, 2);
+                e.Property(x => x.Notes).HasMaxLength(300);
+
+                e.HasIndex(x => new { x.OfferId, x.Seq }).IsUnique(); // una sola línea por secuencia
             });
 
             // ================= Driver (NUEVO) =================
@@ -242,6 +294,12 @@ namespace Route.Backend.Data
 
             // Desactivar cascadas por defecto
             DisableCascadeDelete(modelBuilder);
+
+            //re-habilita CASCADE sólo para Offer -> Lines
+            var lineFk = modelBuilder.Entity<VehicleOfferLine>().Metadata
+            .FindNavigation(nameof(VehicleOfferLine.Offer))!
+            .ForeignKey;
+            lineFk.DeleteBehavior = DeleteBehavior.Cascade;
         }
 
         private static void DisableCascadeDelete(ModelBuilder modelBuilder)
