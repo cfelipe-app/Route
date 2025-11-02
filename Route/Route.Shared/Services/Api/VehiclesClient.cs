@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.WebUtilities;
+using Route.Shared.DTOs;
 using Route.Shared.Entities;
 using Route.Shared.Responses;
 using System.Net.Http.Json;
@@ -101,6 +102,27 @@ namespace Route.Shared.Services.Api
             catch { /* ignore */ }
 
             return $"[{(int)response.StatusCode}] {response.ReasonPhrase}";
+        }
+
+        // ============================================================
+        // NUEVO: Disponibilidad de vehículos por proveedor + fecha
+        // GET api/vehicles/available?providerId=&serviceDate=yyyy-MM-dd&term=
+        // ============================================================
+        public Task<List<VehiclePickDto>?> GetAvailableAsync(
+            int providerId,
+            DateTime serviceDate,
+            string? term = null,
+            CancellationToken cancellationToken = default)
+        {
+            var query = new Dictionary<string, string?>
+            {
+                ["providerId"] = providerId.ToString(),
+                ["serviceDate"] = serviceDate.ToString("yyyy-MM-dd"),
+                ["term"] = string.IsNullOrWhiteSpace(term) ? null : term
+            };
+
+            string url = QueryHelpers.AddQueryString("api/vehicles/available", query);
+            return _httpClient.GetFromJsonAsync<List<VehiclePickDto>>(url, cancellationToken);
         }
     }
 }

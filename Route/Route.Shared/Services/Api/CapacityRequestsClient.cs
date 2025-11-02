@@ -15,7 +15,7 @@ namespace Route.Shared.Services.Api
 
         public async Task<PagedResult<CapacityRequest>> GetPagedAsync(
             PaginationDTO p, CapacityReqStatus? status = null, int? providerId = null, bool? visibleForProvider = null,
-            DateTime? fromDate = null, DateTime? toDate = null)
+            DateTime? fromServiceDate = null, DateTime? toServiceDate = null)
         {
             var q = BuildQuery(
                 ("page", p.Page.ToString()),
@@ -26,8 +26,8 @@ namespace Route.Shared.Services.Api
                 ("status", status?.ToString()),
                 ("providerId", providerId?.ToString()),
                 ("visibleForProvider", visibleForProvider?.ToString().ToLower()),
-                ("fromServiceDate", fromDate?.ToString("yyyy-MM-dd")),
-                ("toServiceDate", toDate?.ToString("yyyy-MM-dd"))
+                ("fromServiceDate", fromServiceDate?.ToString("yyyy-MM-dd")),
+                ("toServiceDate", toServiceDate?.ToString("yyyy-MM-dd"))
             );
             return await Http.GetFromJsonAsync<PagedResult<CapacityRequest>>($"api/capacityrequests/paged{q}")
                    ?? new PagedResult<CapacityRequest>();

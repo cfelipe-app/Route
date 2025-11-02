@@ -13,17 +13,17 @@ namespace Route.Shared.Services.Api
         {
         }
 
-        public record SaveVehicleOfferDto(
-            int CapacityRequestId, int ProviderId, int? VehicleId, int Quantity,
-            double OfferedWeightKg, double OfferedVolumeM3,
-            decimal Price, string Currency, PriceMode PriceMode,
-            DateTime? ValidUntil, string? Notes);
-
-        // DEVUELVE el DTO COMPARTIDO
+        /// <summary>
+        /// /api/vehicleoffers/paged  -> devuelve VehicleOfferDto (paginado + filtros)
+        /// </summary>
         public async Task<PagedResult<VehicleOfferDto>> GetPagedAsync(
             PaginationDTO p,
-            int? capacityRequestId = null, int? providerId = null, int? vehicleId = null,
-            VehicleOfferStatus? status = null, DateTime? fromCreated = null, DateTime? toCreated = null,
+            int? capacityRequestId = null,
+            int? providerId = null,
+            int? vehicleId = null,
+            VehicleOfferStatus? status = null,
+            DateTime? fromCreated = null,
+            DateTime? toCreated = null,
             bool? visibleForProvider = null)
         {
             var q = BuildQuery(
@@ -45,6 +45,9 @@ namespace Route.Shared.Services.Api
                    ?? new PagedResult<VehicleOfferDto>();
         }
 
+        /// <summary>
+        /// /api/vehicleoffers/by-provider/{providerId} -> atajo para un proveedor específico
+        /// </summary>
         public async Task<PagedResult<VehicleOfferDto>> GetByProviderPagedAsync(int providerId, PaginationDTO p)
         {
             var q = BuildQuery(
@@ -60,16 +63,27 @@ namespace Route.Shared.Services.Api
                    ?? new PagedResult<VehicleOfferDto>();
         }
 
+        /// <summary>
+        /// POST /api/vehicleoffers/create
+        /// </summary>
         public Task<HttpResponseMessage> CreateAsync(SaveVehicleOfferDto dto) =>
             Http.PostAsJsonAsync("api/vehicleoffers/create", dto);
 
+        /// <summary>
+        /// PUT /api/vehicleoffers/update/{id}
+        /// </summary>
         public Task<HttpResponseMessage> UpdateAsync(int id, SaveVehicleOfferDto dto) =>
             Http.PutAsJsonAsync($"api/vehicleoffers/update/{id}", dto);
 
+        /// <summary>
+        /// PUT /api/vehicleoffers/{id}/decide  (cambiar estado: Accepted / Rejected / Withdrawn, etc.)
+        /// </summary>
         public Task<HttpResponseMessage> DecideAsync(int id, VehicleOfferStatus status, string? decidedBy = null) =>
             Http.PutAsJsonAsync($"api/vehicleoffers/{id}/decide", new { Status = status, DecidedBy = decidedBy });
 
-        // Lookups de estado
+        /// <summary>
+        /// GET /api/vehicleoffers/lookups/status  (lista de estados con display text del backend)
+        /// </summary>
         public Task<List<EnumLookup<VehicleOfferStatus>>?> GetStatusLookupsAsync() =>
             Http.GetFromJsonAsync<List<EnumLookup<VehicleOfferStatus>>>("api/vehicleoffers/lookups/status");
     }

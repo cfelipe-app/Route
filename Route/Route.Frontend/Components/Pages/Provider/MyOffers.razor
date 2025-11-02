@@ -2,8 +2,11 @@
 
 @using System.Linq
 @using System.Threading
-@using Route.Shared.Enums
 @using Route.Shared.DTOs
+@using Route.Shared.Enums
+@using Route.Shared.Services.Api
+@using Route.Shared.Entities   @* NECESARIO para Provider / CapacityRequest *@
+@using MudBlazor
 
 @inject VehicleOffersClient OffersApi
 @inject CapacityRequestsClient RequestsApi
@@ -11,7 +14,6 @@
 @inject IDialogService Dialog
 @inject ISnackbar Snackbar
 
-@* Simulación de roles mientras no hay autenticación *@
 @code { [Parameter] public bool IsAdmin { get; set; } = false; }
 
 <MudStack Spacing="2">
@@ -19,11 +21,10 @@
         <MudText Typo="Typo.h5">Mis ofertas</MudText>
         <MudSpacer />
         <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="OpenCreateDialog">
-            Nueva oferta
+            NUEVA OFERTA
         </MudButton>
     </MudStack>
 
-    <!-- Filtros -->
     <MudPaper Class="p-4">
         <MudStack Row="true" Spacing="2" AlignItems="AlignItems.End">
             <MudTextField @bind-Value="_filters.Term"
@@ -33,7 +34,6 @@
 
             @if (IsAdmin)
                         {
-            <!-- Autocomplete proveedor (ADMIN) -->
             <MudAutocomplete T="Provider"
                              @bind-Value="_selectedProvider"
                              Label="Proveedor"
@@ -45,11 +45,9 @@
                         }
                         else
             {
-                <!-- Modo proveedor: fijo (simulado) -->
-                <MudTextField T="int" Value="_currentProviderId" Label="Proveedor (ID)" ReadOnly="true" />
+                <MudTextField T="string" Value="@_currentProviderLabel" Label="Proveedor" ReadOnly="true" />
             }
 
-            <!-- Autocomplete requerimiento -->
             <MudAutocomplete T="CapacityRequest"
                              @bind-Value="_selectedRequest"
                              Label="Requerimiento"
@@ -59,12 +57,11 @@
                              Clearable="true"
                              Dense="true" />
 
-            <!-- Estado (lookups desde backend, ya en español) -->
-            <MudSelect T="VehicleOfferStatus?" Label="Estado" @bind-Value="_filters.Status" Clearable="true" Dense="true">
-                @foreach (var it in _statusLookups)
+            <MudSelect T="VehicleOfferStatus?" Label="Estado" @bind-Value="_filters.Status" Clearable="true">
+                @foreach (var opt in _statusLookups)
                 {
-                    <MudSelectItem T="VehicleOfferStatus?" Value="@((VehicleOfferStatus?)it.Value)">
-                        @it.Label
+                    <MudSelectItem T="VehicleOfferStatus?" Value="@((VehicleOfferStatus?)opt.Value)">
+                        @opt.Label
                     </MudSelectItem>
                 }
             </MudSelect>
@@ -75,21 +72,22 @@
             <MudSwitch T="bool" @bind-Checked="_filters.VisibleForProvider" Color="Color.Primary" />
             <MudText>Solo visibles para mi proveedor</MudText>
 
-            <MudButton OnClick="Reload" Color="Color.Primary" Variant="Variant.Filled">Aplicar</MudButton>
-            <MudButton OnClick="ClearFilters" Variant="Variant.Outlined">Limpiar</MudButton>
+            <MudButton OnClick="Reload" Color="Color.Primary" Variant="Variant.Filled">APLICAR</MudButton>
+            <MudButton OnClick="ClearFilters" Variant="Variant.Outlined">LIMPIAR</MudButton>
         </MudStack>
     </MudPaper>
 
-    <!-- Tabla -->
     <MudTable Items="_items" Dense="true" Hover="true" Bordered="true">
         <HeaderContent>
             <MudTh>Id</MudTh>
             <MudTh>Req</MudTh>
             <MudTh>Proveedor</MudTh>
+            <MudTh>Requerimiento</MudTh>
+            <MudTh>Vehículo</MudTh>
+            <MudTh>Cap. ofrecida</MudTh>
             <MudTh>Cant.</MudTh>
             <MudTh>Precio</MudTh>
             <MudTh>Modo</MudTh>
-            <MudTh>Moneda</MudTh>
             <MudTh>Vence</MudTh>
             <MudTh>Estado</MudTh>
             <MudTh>Creado</MudTh>
@@ -98,19 +96,59 @@
         <RowTemplate>
             <MudTd>@context.Id</MudTd>
             <MudTd>@context.CapacityRequestId</MudTd>
-            <MudTd>@(string.IsNullOrWhiteSpace(context.ProviderName) ? $"#{context.ProviderId}" : context.ProviderName)</MudTd>
-            @* <MudTd>@(IsAdmin? context.ProviderName: _currentProviderLabel)</MudTd> *@
+
+            <MudTd>
+                @(string.IsNullOrWhiteSpace(context.ProviderName) ? $"#{context.ProviderId}" : context.ProviderName)
+            </MudTd>
+
+            <!-- Requerimiento: #Id + fecha + zona + ventana -->
+            <MudTd>
+                <div class="flex flex-col">
+                    <div>
+                        #@context.CapacityRequestId ·
+                        @((context.ReqServiceDate == default) ? "-" : context.ReqServiceDate.ToString("yyyy-MM-dd"))
+                    </div>
+                    <small class="mud-muted-text">
+                        @context.ReqZone
+                        @if (context.ReqWindowStart.HasValue && context.ReqWindowEnd.HasValue)
+                        {
+                            <text> · @context.ReqWindowStart.Value.ToString(@"hh\:mm")–@context.ReqWindowEnd.Value.ToString(@"hh\:mm")</text>
+                        }
+                    </small>
+                </div>
+            </MudTd>
+
+            <!-- Vehículo: si hay placa, mostramos placa + capacidad abreviada; si no, guion -->
+            <MudTd>
+                @if (context.VehicleId.HasValue)
+                {
+                    <div class="flex flex-col">
+                        <small>@context.VehiclePlate</small>
+                        <small class="mud-muted-text">
+                            @(string.IsNullOrWhiteSpace(context.VehicleTonnageLabel) ? "" : $" - {context.VehicleTonnageLabel}")
+                        </small>
+                    </div>
+                }
+                else
+                {
+                    <span>-</span>
+                }
+            </MudTd>
+
+            <MudTd>@($"{context.OfferedWeightKg:N0} kg / {context.OfferedVolumeM3:N1} m³")</MudTd>
             <MudTd>@context.Quantity</MudTd>
-            <MudTd>@context.Price</MudTd>
+            <MudTd>@($"{context.Price:N2} {context.Currency}")</MudTd>
             <MudTd>@context.PriceModeText</MudTd>
-            <MudTd>@context.Currency</MudTd>
-            <MudTd>@(context.ValidUntil.HasValue? context.ValidUntil.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "-")</MudTd>
+            <MudTd>@(context.ValidUntil?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "-")</MudTd>
+
             <MudTd>
                 <MudChip T="string" Variant="Variant.Filled" Color="@ChipColor(context.Status)">
                     @context.StatusText
                 </MudChip>
             </MudTd>
+
             <MudTd>@context.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</MudTd>
+
             <MudTd>
                 <MudMenu>
                     <ActivatorContent>
@@ -124,10 +162,8 @@
         </RowTemplate>
     </MudTable>
 
-    <!-- Paginación -->
     <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
         <MudText>Total: @_total</MudText>
-
         <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
             <MudText>Por página</MudText>
             <MudSelect T="int" @bind-Value="_pagination.RecordsNumber" Style="width:100px"
@@ -137,34 +173,26 @@
                     <MudSelectItem Value="@size">@size</MudSelectItem>
                 }
             </MudSelect>
-
             <MudPagination Page="@_pagination.Page" Count="@_pages" PageChanged="OnPageChanged" />
         </MudStack>
     </MudStack>
 </MudStack>
 
 @code {
-    // ===== Estado UI =====
-    List<VehicleOfferDto> _items = new();
-    int _total = 0;
-    int _pages => (int)Math.Ceiling((_total == 0 ? 1 : _total) / (double)_pagination.RecordsNumber);
-    readonly int[] _pageSizes = new[] { 10, 20, 50 };
+    private List<VehicleOfferDto> _items = new();
+    private int _total;
+    private int _pages => (int)Math.Ceiling((_total == 0 ? 1 : _total) / (double)_pagination.RecordsNumber);
+    private readonly int[] _pageSizes = new[] { 10, 20, 50 };
 
-    // Lookups de estado (desde backend)
-    List<EnumLookup<VehicleOfferStatus>> _statusLookups = new();
+    private int _currentProviderId = 1;
+    private string _currentProviderLabel => $"#{_currentProviderId}";
 
-    // Proveedor "actual" para modo proveedor (sin auth todavía)
-    int _currentProviderId = 1;                 // <-- ajusta si quieres simular otro
-    string _currentProviderLabel => $"#{_currentProviderId}";
+    private Provider? _selectedProvider;
+    private CapacityRequest? _selectedRequest;
 
-    // ADMIN
-    Provider? _selectedProvider;
+    private List<EnumLookup<VehicleOfferStatus>> _statusLookups = new();
 
-    // Requerimiento seleccionado
-    CapacityRequest? _selectedRequest;
-
-    // Filtros + paginación
-    class Filters
+    private class Filters
     {
         public string? Term { get; set; }
         public VehicleOfferStatus? Status { get; set; }
@@ -173,19 +201,16 @@
         public bool VisibleForProvider { get; set; } = true;
     }
 
-    Filters _filters = new();
-    PaginationDTO _pagination = new() { Page = 1, RecordsNumber = 20, SortBy = "CreatedAt", SortDir = "desc" };
+    private Filters _filters = new();
+    private PaginationDTO _pagination = new() { Page = 1, RecordsNumber = 20, SortBy = "CreatedAt", SortDir = "desc" };
 
     protected override async Task OnInitializedAsync()
     {
-        // 1) Lookups (etiquetas en español)
         _statusLookups = await OffersApi.GetStatusLookupsAsync() ?? new();
-        // 2) Grilla
         await Reload();
     }
 
-    // ===== Carga =====
-    async Task Reload()
+    private async Task Reload()
     {
         _pagination.Term = string.IsNullOrWhiteSpace(_filters.Term) ? null : _filters.Term!.Trim();
 
@@ -204,22 +229,15 @@
 
         _items = page.Items?.ToList() ?? new();
         _total = page.Total;
-
-        StateHasChanged();
     }
 
-    void ClearFilters()
+    private void ClearFilters()
     {
         _filters = new Filters { VisibleForProvider = true };
         _selectedRequest = null;
         if (!IsAdmin) _selectedProvider = null;
 
-        _pagination.Page = 1;
-        _pagination.RecordsNumber = 20;
-        _pagination.SortBy = "CreatedAt";
-        _pagination.SortDir = "desc";
-        _pagination.Term = null;
-
+        _pagination = new() { Page = 1, RecordsNumber = 20, SortBy = "CreatedAt", SortDir = "desc" };
         _ = Reload();
     }
 
@@ -236,7 +254,6 @@
         await Reload();
     }
 
-    // ===== Autocomplete: Proveedores (ADMIN) =====
     private async Task<IEnumerable<Provider>> SearchProviders(string value, CancellationToken ct)
     {
         var page = await ProvidersApi.GetPagedAsync(
@@ -251,10 +268,9 @@
         return page?.Items ?? Enumerable.Empty<Provider>();
     }
 
-    private static string ProviderToString(Provider? p)
-        => p is null ? string.Empty : $"{p.Name} (#{p.Id})";
+    private static string ProviderToString(Provider? p) =>
+        p is null ? string.Empty : $"{p.Name} (#{p.Id})";
 
-    // ===== Autocomplete: Requerimientos =====
     private async Task<IEnumerable<CapacityRequest>> SearchRequests(string value, CancellationToken ct)
     {
         var search = new PaginationDTO
@@ -271,18 +287,17 @@
             status: CapacityReqStatus.Open,
             providerId: null,
             visibleForProvider: null,
-            fromDate: null,
-            toDate: null
+            fromServiceDate: null,
+            toServiceDate: null
         );
 
         ct.ThrowIfCancellationRequested();
         return page.Items ?? Enumerable.Empty<CapacityRequest>();
     }
 
-    private static string ReqToString(CapacityRequest? r)
-        => r is null ? string.Empty : $"#{r.Id} | {r.ServiceDate:yyyy-MM-dd} {r.Zone}";
+    private static string ReqToString(CapacityRequest? r) =>
+        r is null ? string.Empty : $"#{r.Id} | {r.ServiceDate:yyyy-MM-dd} {r.Zone}";
 
-    // ===== Diálogos =====
     private async Task OpenCreateDialog()
     {
         int? providerId = IsAdmin ? _selectedProvider?.Id : _currentProviderId;
@@ -301,9 +316,9 @@
         var parameters = new DialogParameters
         {
             { nameof(OfferDialog.CapacityRequestId), _selectedRequest.Id },
-            { nameof(OfferDialog.ProviderId), providerId.Value }
+            { nameof(OfferDialog.ProviderId),        providerId.Value }
         };
-        var options = new DialogOptions { MaxWidth = MaxWidth.Small, CloseOnEscapeKey = true };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, CloseOnEscapeKey = true };
 
         var dialog = Dialog.Show<OfferDialog>("Nueva oferta", parameters, options);
         var result = await dialog.Result;
@@ -316,27 +331,10 @@
         var parameters = new DialogParameters
         {
             { nameof(OfferDialog.CapacityRequestId), offer.CapacityRequestId },
-            { nameof(OfferDialog.ProviderId), offer.ProviderId },
-            { nameof(OfferDialog.CurrentOffer), new VehicleOffer  // si OfferDialog espera entidad
-                {
-                    Id = offer.Id,
-                    CapacityRequestId = offer.CapacityRequestId,
-                    ProviderId = offer.ProviderId,
-                    VehicleId = null,
-                    Quantity = offer.Quantity,
-                    OfferedWeightKg = offer.OfferedWeightKg,
-                    OfferedVolumeM3 = offer.OfferedVolumeM3,
-                    Price = offer.Price,
-                    Currency = offer.Currency,
-                    PriceMode = offer.PriceMode,
-                    ValidUntil = offer.ValidUntil,
-                    Notes = offer.Notes,
-                    Status = offer.Status,
-                    CreatedAt = offer.CreatedAt
-                }
-            }
+            { nameof(OfferDialog.ProviderId),        offer.ProviderId },
+            { nameof(OfferDialog.CurrentOffer),      offer }
         };
-        var options = new DialogOptions { MaxWidth = MaxWidth.Small, CloseOnEscapeKey = true };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, CloseOnEscapeKey = true };
 
         var dialog = Dialog.Show<OfferDialog>($"Editar oferta #{offer.Id}", parameters, options);
         var result = await dialog.Result;
@@ -344,8 +342,7 @@
             await Reload();
     }
 
-    // ===== Helpers =====
-    static Color ChipColor(VehicleOfferStatus status) => status switch
+    private static Color ChipColor(VehicleOfferStatus status) => status switch
     {
         VehicleOfferStatus.Draft => Color.Default,
         VehicleOfferStatus.Sent => Color.Info,
@@ -356,3 +353,4 @@
         _ => Color.Default
     };
 }
+

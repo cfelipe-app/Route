@@ -41,11 +41,8 @@ namespace Route.Backend.Data
                 e.Property(x => x.CreatedAt).HasDefaultValueSql("GETUTCDATE()");
                 e.HasIndex(x => x.TaxId).IsUnique().HasFilter("[TaxId] IS NOT NULL");
 
-                // Si deseas que los Admins vean inactivos desde backend,
-                // considera NO usar filtro global o ignorarlo en queries específicas con .IgnoreQueryFilters()
+                // Filtro global de activos
                 e.HasQueryFilter(p => p.IsActive);
-
-                // Relación con Drivers se configura en Driver (WithMany)
             });
 
             // ================= Vehicle =================
@@ -63,7 +60,8 @@ namespace Route.Backend.Data
                     .HasForeignKey(v => v.ProviderId)
                     .OnDelete(DeleteBehavior.Restrict);
 
-                e.HasQueryFilter(v => v.IsActive);
+                // Coincidir filtro global del lado dependiente (quita warning 10622)
+                e.HasQueryFilter(v => v.IsActive && v.Provider.IsActive);
             });
 
             // ================= Order =================
@@ -193,7 +191,6 @@ namespace Route.Backend.Data
             {
                 e.ToTable("VehicleOffers");
 
-                // Básicos
                 e.Property(x => x.Price).HasPrecision(18, 2);
                 e.Property(x => x.Currency).IsRequired().HasMaxLength(3).HasDefaultValue("PEN");
                 e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
@@ -204,43 +201,36 @@ namespace Route.Backend.Data
                 e.Property(x => x.DecisionAt).HasColumnType("datetime2");
                 e.Property(x => x.DecidedBy).HasMaxLength(80);
 
-                // Capacidades con precisión
                 e.Property(x => x.OfferedWeightKg).HasPrecision(18, 3);
                 e.Property(x => x.OfferedVolumeM3).HasPrecision(18, 3);
 
-                // Relaciones
                 e.HasOne(x => x.CapacityRequest)
-                 .WithMany(cr => cr.Offers)
-                 .HasForeignKey(x => x.CapacityRequestId)
-                 .OnDelete(DeleteBehavior.Restrict);
+                    .WithMany(cr => cr.Offers)
+                    .HasForeignKey(x => x.CapacityRequestId)
+                    .OnDelete(DeleteBehavior.Restrict);
 
                 e.HasOne(x => x.Provider)
-                 .WithMany()
-                 .HasForeignKey(x => x.ProviderId)
-                 .OnDelete(DeleteBehavior.Restrict);
+                    .WithMany()
+                    .HasForeignKey(x => x.ProviderId)
+                    .OnDelete(DeleteBehavior.Restrict);
 
                 e.HasOne(x => x.Vehicle)
-                 .WithMany()
-                 .HasForeignKey(x => x.VehicleId)
-                 .OnDelete(DeleteBehavior.Restrict);
+                    .WithMany()
+                    .HasForeignKey(x => x.VehicleId)
+                    .OnDelete(DeleteBehavior.Restrict);
 
-                // Índices útiles
                 e.HasIndex(x => x.ProviderId);
                 e.HasIndex(x => new { x.CapacityRequestId, x.Status });
 
-                // --- REGLA DE NEGOCIO DE UNICIDAD ---
-                // 1) Único por (CapacityRequestId, VehicleId) cuando hay placa:
                 e.HasIndex(x => new { x.CapacityRequestId, x.VehicleId })
-                 .IsUnique()
-                 .HasDatabaseName("UX_VehicleOffers_ByRequestVehicle")
-                 .HasFilter("[VehicleId] IS NOT NULL");
+                    .IsUnique()
+                    .HasDatabaseName("UX_VehicleOffers_ByRequestVehicle")
+                    .HasFilter("[VehicleId] IS NOT NULL");
 
-                // 2) (ANTES era único). Ahora: índice normal para consultas o elimínalo si no lo usas.
                 e.HasIndex(x => new { x.CapacityRequestId, x.ProviderId })
-                 .HasDatabaseName("IX_VehicleOffers_ByRequestProvider_Aggregated")
-                 .HasFilter("[VehicleId] IS NULL");
+                    .HasDatabaseName("IX_VehicleOffers_ByRequestProvider_Aggregated")
+                    .HasFilter("[VehicleId] IS NULL");
 
-                // Check constraints para datos sanos
                 e.ToTable(tb =>
                 {
                     tb.HasCheckConstraint("CK_VehicleOffers_Quantity_Positive", "Quantity >= 1");
@@ -249,16 +239,20 @@ namespace Route.Backend.Data
                                           "OfferedWeightKg >= 0 AND OfferedVolumeM3 >= 0");
                 });
 
+                // Relación con líneas + cascade explícito
                 e.HasMany(o => o.Lines)
                  .WithOne(l => l.Offer)
-                 .HasForeignKey(l => l.OfferId);
+                 .HasForeignKey(l => l.OfferId)
+                 .OnDelete(DeleteBehavior.Cascade);
+
+                // Coincidir filtro global del lado dependiente
+                e.HasQueryFilter(vo => vo.Provider.IsActive);
             });
 
-            // ================= VehicleOfferLine (NUEVO) =================
+            // ================= VehicleOfferLine =================
             modelBuilder.Entity<VehicleOfferLine>(e =>
             {
                 e.ToTable("VehicleOfferLines");
-
                 e.Property(x => x.Seq).IsRequired();
                 e.Property(x => x.ServiceDate).IsRequired();
                 e.Property(x => x.WindowStart).HasColumnType("time");
@@ -266,10 +260,13 @@ namespace Route.Backend.Data
                 e.Property(x => x.Price).HasPrecision(18, 2);
                 e.Property(x => x.Notes).HasMaxLength(300);
 
-                e.HasIndex(x => new { x.OfferId, x.Seq }).IsUnique(); // una sola línea por secuencia
+                e.HasIndex(x => new { x.OfferId, x.Seq }).IsUnique();
+
+                //Filtro global que “empareja” al del padre (VehicleOffer)
+                e.HasQueryFilter(l => l.Offer.Provider.IsActive);
             });
 
-            // ================= Driver (NUEVO) =================
+            /// ================= Driver =================
             modelBuilder.Entity<Driver>(e =>
             {
                 e.Property(x => x.FullName).HasMaxLength(150).IsRequired();
@@ -286,20 +283,24 @@ namespace Route.Backend.Data
                     .HasForeignKey(x => x.ProviderId)
                     .OnDelete(DeleteBehavior.Restrict);
 
-                // Documento único por proveedor (si se repite en otro provider, permitido)
                 e.HasIndex(x => new { x.ProviderId, x.DocumentId })
-                 .IsUnique()
-                 .HasFilter("[DocumentId] IS NOT NULL");
+                    .IsUnique()
+                    .HasFilter("[DocumentId] IS NOT NULL");
+
+                // Coincidir filtro global del lado dependiente (quita warning 10622)
+                e.HasQueryFilter(d => d.IsActive && d.Provider.IsActive);
             });
 
-            // Desactivar cascadas por defecto
+            // Desactivar cascadas por defecto…
             DisableCascadeDelete(modelBuilder);
 
-            //re-habilita CASCADE sólo para Offer -> Lines
-            var lineFk = modelBuilder.Entity<VehicleOfferLine>().Metadata
-            .FindNavigation(nameof(VehicleOfferLine.Offer))!
-            .ForeignKey;
-            lineFk.DeleteBehavior = DeleteBehavior.Cascade;
+            // …pero asegúrate de que Offer → Lines quede en Cascade (por si el método anterior
+            // lo cambió). Esto vuelve a establecer Cascade *después* del cambio global:
+            modelBuilder.Entity<VehicleOfferLine>()
+                .HasOne(l => l.Offer)
+                .WithMany(o => o.Lines)
+                .HasForeignKey(l => l.OfferId)
+                .OnDelete(DeleteBehavior.Cascade);
         }
 
         private static void DisableCascadeDelete(ModelBuilder modelBuilder)

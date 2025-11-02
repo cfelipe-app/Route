@@ -143,5 +143,53 @@ namespace Route.Backend.Controllers
             vehicle.Model = string.IsNullOrWhiteSpace(vehicle.Model) ? null : vehicle.Model.Trim();
             vehicle.Type = string.IsNullOrWhiteSpace(vehicle.Type) ? null : vehicle.Type.Trim();
         }
+
+        // ============================================================
+        // NUEVO: Vehículos disponibles por proveedor y fecha
+        // GET /api/vehicles/available?providerId=1&serviceDate=2025-10-01&term=hiace
+        // ============================================================
+        [HttpGet("available")]
+        public async Task<ActionResult<List<VehiclePickDto>>> GetAvailable(
+            [FromQuery] int providerId,
+            [FromQuery] DateTime serviceDate,
+            [FromQuery] string? term = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (providerId <= 0)
+                return BadRequest("providerId es obligatorio y debe ser > 0.");
+
+            // Base: vehículos activos del proveedor (los filtros globales ya excluyen Provider inactivo)
+            var q = _vehicleRepository.Query()
+                .Where(v => v.ProviderId == providerId);
+
+            // Excluir los que ya tienen ruta ese día (cualquier estado que bloquee disponibilidad).
+            // Ajusta los estados si deseas permitir, por ejemplo, 'Cancelled'.
+            q = q.Where(v => !v.Routes.Any(r => r.ServiceDate == serviceDate));
+
+            // Filtro por término (opcional)
+            if (!string.IsNullOrWhiteSpace(term))
+            {
+                var t = term.Trim().ToLower();
+                q = q.Where(v =>
+                    v.Plate.ToLower().Contains(t) ||
+                    (v.Brand != null && v.Brand.ToLower().Contains(t)) ||
+                    (v.Model != null && v.Model.ToLower().Contains(t)) ||
+                    (v.CapacityTonnageLabel != null && v.CapacityTonnageLabel.ToLower().Contains(t)));
+            }
+
+            var list = await q
+                .OrderBy(v => v.Plate)
+                .Select(v => new VehiclePickDto
+                {
+                    Id = v.Id,
+                    Plate = v.Plate,
+                    CapacityTonnageLabel = v.CapacityTonnageLabel
+                })
+                .Take(50) // límite razonable para autocomplete
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            return Ok(list);
+        }
     }
 }

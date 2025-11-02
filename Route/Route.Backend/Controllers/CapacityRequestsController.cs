@@ -30,6 +30,7 @@ namespace Route.Backend.Controllers
         /// </summary>
         /// Ejemplo:
         /// GET /api/capacityrequests/paged?term=Sur&page=1&recordsNumber=10&sortBy=ServiceDate&sortDir=asc&status=Open&providerId=5&visibleForProvider=true&fromServiceDate=2025-10-01&toServiceDate=2025-10-31
+        /*
         [HttpGet("paged")]
         [ProducesResponseType(typeof(PagedResult<CapacityRequest>), StatusCodes.Status200OK)]
         public async Task<ActionResult<PagedResult<CapacityRequest>>> GetPaged(
@@ -93,6 +94,83 @@ namespace Route.Backend.Controllers
             // 7) Total + página
             var totalRecords = await orderedQuery.CountAsync(cancellationToken);
             var items = await orderedQuery.Paginate(pagination).ToListAsync(cancellationToken);
+
+            Response.Headers["X-Total-Count"] = totalRecords.ToString();
+
+            return Ok(new PagedResult<CapacityRequest>
+            {
+                Items = items,
+                Page = pagination.Page,
+                PageSize = pagination.RecordsNumber,
+                Total = totalRecords
+            });
+        }
+        */
+
+        [HttpGet("paged")]
+        [ProducesResponseType(typeof(PagedResult<CapacityRequest>), StatusCodes.Status200OK)]
+        public async Task<ActionResult<PagedResult<CapacityRequest>>> GetPaged(
+        [FromQuery] PaginationDTO pagination,
+        [FromQuery] CapacityReqStatus? status = null,
+        [FromQuery] int? providerId = null,
+        [FromQuery] bool? visibleForProvider = null,
+        [FromQuery] DateTime? fromServiceDate = null,
+        [FromQuery] DateTime? toServiceDate = null,
+        CancellationToken cancellationToken = default)
+        {
+            // Orden por defecto
+            var sortBy = string.IsNullOrWhiteSpace(pagination.SortBy) ? "ServiceDate" : pagination.SortBy!;
+            var sortDir = string.IsNullOrWhiteSpace(pagination.SortDir) ? "asc" : pagination.SortDir;
+
+            // 1) Base query
+            IQueryable<CapacityRequest> query = _capacityRequestRepository
+                .Query()
+                .AsNoTracking();
+
+            // 2) Búsqueda simple
+            if (!string.IsNullOrWhiteSpace(pagination.Term))
+            {
+                var termLower = pagination.Term.Trim().ToLower();
+                query = query.Where(cr =>
+                    (cr.Zone != null && cr.Zone.ToLower().Contains(termLower)) ||
+                    (cr.CreatedBy != null && cr.CreatedBy.ToLower().Contains(termLower)));
+            }
+
+            // 3) Estado
+            if (status.HasValue)
+                query = query.Where(cr => cr.Status == status.Value);
+
+            // === 4) Rango de fechas con DEFAULT: hoy en adelante ===
+            var today = DateTime.Today;
+            if (!fromServiceDate.HasValue && !toServiceDate.HasValue)
+            {
+                // Sin rango => solo futuras/actuales
+                query = query.Where(cr => cr.ServiceDate >= today);
+            }
+            else
+            {
+                if (fromServiceDate.HasValue)
+                    query = query.Where(cr => cr.ServiceDate >= fromServiceDate.Value.Date);
+
+                if (toServiceDate.HasValue)
+                {
+                    var exclusiveEnd = toServiceDate.Value.Date.AddDays(1);
+                    query = query.Where(cr => cr.ServiceDate < exclusiveEnd);
+                }
+            }
+
+            // 5) Visibilidad (públicas o privadas dirigidas al proveedor indicado)
+            if (visibleForProvider == true && providerId.HasValue)
+            {
+                int pid = providerId.Value;
+                query = query.Where(cr => !cr.OnlyTargetProvider ||
+                                          (cr.ProviderId != null && cr.ProviderId == pid));
+            }
+
+            // 6) Ordenar + paginar
+            var ordered = query.ApplySort(sortBy, sortDir);
+            var totalRecords = await ordered.CountAsync(cancellationToken);
+            var items = await ordered.Paginate(pagination).ToListAsync(cancellationToken);
 
             Response.Headers["X-Total-Count"] = totalRecords.ToString();
 

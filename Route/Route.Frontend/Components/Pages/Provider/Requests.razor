@@ -1,20 +1,19 @@
 ﻿@page "/provider/requests"
 
-@using System.ComponentModel      <!-- Para DescriptionAttribute -->
 @using System.Linq
 @using System.Threading
-@using Route.Shared               <!-- PagedResult, PaginationDTO si viven aquí -->
-@using Route.Shared.Entities      <!-- CapacityRequest, Provider -->
-@using Route.Shared.Enums         <!-- CapacityReqStatus -->
-@using Route.Shared.DTOs          <!-- si necesitas DTOs -->
-@* ajusta estos usings si tus tipos viven en otros namespaces *@
+@using Route.Shared
+@using Route.Shared.Entities
+@using Route.Shared.Enums
+@using Route.Shared.DTOs
+@using Route.Shared.Services.Api
+@using MudBlazor
 
 @inject CapacityRequestsClient RequestsApi
 @inject ProvidersClient ProvidersApi
 @inject IDialogService Dialog
 @inject ISnackbar Snackbar
 
-@* Simula roles mientras no hay auth *@
 @code { [Parameter] public bool IsAdmin { get; set; } = false; }
 
 <MudStack Spacing="2">
@@ -25,7 +24,6 @@
   <!-- Filtros -->
   <MudPaper Class="p-4">
     <MudStack Row="true" Spacing="2" AlignItems="AlignItems.End">
-
       <MudTextField @bind-Value="_filters.Term"
                     Label="Buscar (zona/notas)"
                     Adornment="Adornment.Start"
@@ -33,6 +31,7 @@
 
       @if (IsAdmin)
       {
+        <!-- OJO: ToStringFunc apunta a un MÉTODO, no a un lambda inline -->
         <MudAutocomplete T="Provider"
                          @bind-Value="_selectedProvider"
                          Label="Proveedor (visibilidad)"
@@ -49,17 +48,15 @@
       <MudSelect T="CapacityReqStatus?" Label="Estado" @bind-Value="_filters.Status" Clearable="true">
         @foreach (var st in _statusOptions)
         {
-          <MudSelectItem T="CapacityReqStatus?" Value="@((CapacityReqStatus?)st)">
-            @StatusLabel(st)
-          </MudSelectItem>
+          <MudSelectItem T="CapacityReqStatus?" Value="@((CapacityReqStatus?)st)">@st</MudSelectItem>
         }
       </MudSelect>
 
       <MudSwitch T="bool" @bind-Checked="_filters.VisibleForProvider" Color="Color.Primary" />
       <MudText>Solo visibles para mi proveedor</MudText>
 
-      <MudButton OnClick="Reload" Color="Color.Primary" Variant="Variant.Filled">Aplicar</MudButton>
-      <MudButton OnClick="ClearFilters" Variant="Variant.Outlined">Limpiar</MudButton>
+      <MudButton OnClick="Reload" Color="Color.Primary" Variant="Variant.Filled">APLICAR</MudButton>
+      <MudButton OnClick="ClearFilters" Variant="Variant.Outlined">LIMPIAR</MudButton>
     </MudStack>
   </MudPaper>
 
@@ -76,7 +73,6 @@
       <MudTh>Estado</MudTh>
       <MudTh></MudTh>
     </HeaderContent>
-
     <RowTemplate>
       <MudTd>@context.Id</MudTd>
       <MudTd>@context.ServiceDate.ToString("yyyy-MM-dd")</MudTd>
@@ -86,9 +82,7 @@
       <MudTd>@(context.OnlyTargetProvider ? "Sí" : "No")</MudTd>
       <MudTd>@(context.ProviderId is int pid ? $"#{pid}" : "-")</MudTd>
       <MudTd>
-        <MudChip T="String" Variant="Variant.Filled" Color="@ChipColor(context.Status)">
-          @StatusLabel(context.Status)
-        </MudChip>
+          <MudChip T="CapacityReqStatus" Variant="Variant.Filled" Color="@ChipColor(context.Status)">@context.Status</MudChip>
       </MudTd>
       <MudTd>
         <MudButton Size="Size.Small"
@@ -96,7 +90,7 @@
                    Variant="Variant.Outlined"
                    Disabled="@(!CanCreateOffer(context))"
                    OnClick="@(() => OpenCreateOffer(context))">
-          Nueva oferta
+          NUEVA OFERTA
         </MudButton>
       </MudTd>
     </RowTemplate>
@@ -122,16 +116,16 @@
 </MudStack>
 
 @code {
-  // ========= Estado UI =========
+  // ===== Estado UI =====
   List<CapacityRequest> _items = new();
   int _total = 0;
   int _pages => (int)Math.Ceiling((_total == 0 ? 1 : _total) / (double)_pagination.RecordsNumber);
   readonly int[] _pageSizes = new[] { 10, 20, 50 };
 
-  // Proveedor actual (simulado sin auth)
+  // Proveedor actual (simulado)
   int _currentProviderId = 1;
 
-  // ADMIN: proveedor (filtro de visibilidad)
+  // ADMIN: proveedor para filtrar visibilidad
   Provider? _selectedProvider;
 
   // Filtros + paginación
@@ -148,10 +142,8 @@
   PaginationDTO _pagination = new() { Page = 1, RecordsNumber = 20, SortBy = "ServiceDate", SortDir = "desc" };
   CapacityReqStatus[] _statusOptions = Enum.GetValues<CapacityReqStatus>();
 
-  // ========= Ciclo de vida =========
   protected override async Task OnInitializedAsync() => await Reload();
 
-  // ========= Carga =========
   async Task Reload()
   {
     _pagination.Term = string.IsNullOrWhiteSpace(_filters.Term) ? null : _filters.Term!.Trim();
@@ -161,8 +153,8 @@
       status: _filters.Status,
       providerId: IsAdmin ? _selectedProvider?.Id : _currentProviderId,
       visibleForProvider: _filters.VisibleForProvider,
-      fromDate: _filters.FromDate,
-      toDate: _filters.ToDate
+      fromServiceDate: _filters.FromDate,
+      toServiceDate: _filters.ToDate
     );
 
     _items = page.Items?.ToList() ?? new();
@@ -191,17 +183,11 @@
     await Reload();
   }
 
-  // ========= Crear oferta desde la fila =========
+  // ===== Crear oferta desde fila =====
   bool CanCreateOffer(CapacityRequest cr)
   {
-    // Permitir crear oferta cuando el req está Abierto o En Cotización
-    var okEstado = cr.Status is CapacityReqStatus.Open or CapacityReqStatus.Quoted;
-    if (!okEstado) return false;
-
-    // Si es visible sólo para un proveedor, respeta la visibilidad (salvo admin)
-    if (cr.OnlyTargetProvider && cr.ProviderId != _currentProviderId && !IsAdmin)
-      return false;
-
+    if (cr.Status != CapacityReqStatus.Open) return false;
+    if (cr.OnlyTargetProvider && cr.ProviderId != _currentProviderId && !IsAdmin) return false;
     return true;
   }
 
@@ -211,17 +197,17 @@
 
     var parameters = new DialogParameters {
       { nameof(OfferDialog.CapacityRequestId), cr.Id },
-      { nameof(OfferDialog.ProviderId), providerId }
+      { nameof(OfferDialog.ProviderId),        providerId }
     };
     var options = new DialogOptions { MaxWidth = MaxWidth.Medium, CloseOnEscapeKey = true };
 
     var dialog = Dialog.Show<OfferDialog>($"Nueva oferta · Req #{cr.Id}", parameters, options);
     var result = await dialog.Result;
     if (!result.Canceled)
-      Snackbar.Add("Oferta creada.", Severity.Success);
+      await Reload();
   }
 
-  // ========= Autocomplete (ADMIN) =========
+  // ===== Autocomplete proveedores (admin) =====
   private async Task<IEnumerable<Provider>> SearchProviders(string value, CancellationToken ct)
   {
     var page = await ProvidersApi.GetPagedAsync(
@@ -231,28 +217,20 @@
     return page?.Items ?? Enumerable.Empty<Provider>();
   }
 
+  // Importante: ToStringFunc debe ser un método
   private static string ProviderToString(Provider? p)
-    => p is null ? string.Empty : $"{p.Name} (#{p.Id})";
+      => p is null ? string.Empty : $"{p.Name} (#{p.Id})";
 
-  // ========= Etiquetas y colores =========
-  static string StatusLabel(CapacityReqStatus s)
-  {
-    var mem = typeof(CapacityReqStatus).GetMember(s.ToString()).FirstOrDefault();
-    var desc = mem?.GetCustomAttributes(typeof(DescriptionAttribute), false)
-                  .Cast<DescriptionAttribute>()
-                  .FirstOrDefault()?.Description;
-    return string.IsNullOrWhiteSpace(desc) ? s.ToString() : desc!;
-  }
-
+  // ===== Helpers =====
   static Color ChipColor(CapacityReqStatus status) => status switch
   {
-    CapacityReqStatus.Open              => Color.Info,     // Abierta
-    CapacityReqStatus.Quoted            => Color.Warning,  // En cotización
-    CapacityReqStatus.Awarded           => Color.Success,  // Adjudicada
-    CapacityReqStatus.PartiallyAwarded  => Color.Secondary,// Parcialmente adjudicada
-    CapacityReqStatus.Closed            => Color.Dark,     // Cerrada
-    CapacityReqStatus.Expired           => Color.Dark,     // Vencida
-    CapacityReqStatus.Cancelled         => Color.Error,    // Cancelada
+    CapacityReqStatus.Open              => Color.Info,
+    CapacityReqStatus.Quoted            => Color.Primary,
+    CapacityReqStatus.Awarded           => Color.Success,
+    CapacityReqStatus.PartiallyAwarded  => Color.Warning,
+    CapacityReqStatus.Closed            => Color.Dark,
+    CapacityReqStatus.Expired           => Color.Dark,
+    CapacityReqStatus.Cancelled         => Color.Error,
     _ => Color.Default
   };
 }

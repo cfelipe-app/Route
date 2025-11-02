@@ -1,139 +1,276 @@
-﻿
+﻿@using MudBlazor
+@using Route.Shared.Enums
+@using Route.Shared.DTOs           @* VehicleOfferDto, VehiclePickDto *@
+@using Route.Shared.Entities       @* Provider *@
+@using Route.Shared.Services.Api
 
 @inject VehicleOffersClient OffersApi
+@inject ProvidersClient ProvidersApi
+@inject VehiclesClient VehiclesApi
 @inject ISnackbar Snackbar
-<MudDialog MaxWidth="MaxWidth.Small" FullWidth="true">
+
+<MudDialog>
     <DialogContent>
-        <EditForm Model="_form" OnValidSubmit="SaveAsync">
-            <DataAnnotationsValidator />
-            <MudStack Spacing="2">
-                @* <MudText Typo="Typo.h6">@(_isEdit ? "Editar oferta" : "Nueva oferta")</MudText> *@
+        <MudStack Spacing="2">
+            <MudText Typo="Typo.h6">
+                @(_isEdit
+                                ? $"Editar oferta #{_offerId} · Req #{CapacityRequestId}{_reqSummary}"
+                                : $"Nueva oferta · Req #{CapacityRequestId}{_reqSummary}")
+            </MudText>
 
-                @* Ya NO pedimos CapacityRequestId ni ProviderId *@
+            @if (ReqOnlyTargetProvider is not null)
+            {
+                <MudAlert Severity="@(ReqOnlyTargetProvider == true ? Severity.Warning : Severity.Info)"
+                          Elevation="0" Dense="true">
+                    @(ReqOnlyTargetProvider == true
+                                    ? "Requerimiento dirigido a proveedor destino (sólo ese proveedor ve este requerimiento)."
+                                    : "Requerimiento abierto (visible para todos los proveedores).")
+            </MudAlert>
+                        }
 
-                <MudNumericField T="int" @bind-Value="_form.Quantity" Label="Cantidad de unidades" Required="true" Min="1" />
-                <MudNumericField T="double" @bind-Value="_form.OfferedWeightKg" Label="Peso por unidad (kg)" Min="0" />
-                <MudNumericField T="double" @bind-Value="_form.OfferedVolumeM3" Label="Volumen por unidad (m³)" Min="0" />
+            <MudStack Row="true" Spacing="2">
+                @if (IsAdmin)
+                {
+                    <MudAutocomplete T="Provider"
+                                     @bind-Value="_selectedProvider"
+                                     Label="Proveedor"
+                                     ToStringFunc="@(p => p is null ? string.Empty : $"{p.Name} (#{p.Id})")"
+                                     SearchFunc="SearchProviders"
+                                     ResetValueOnEmptyText="true"
+                                     Clearable="false"
+                                     Dense="true" />
+                }
+                else
+                {
+                    <MudTextField T="int" Label="Proveedor" Value="@ProviderId" ReadOnly="true" />
+                }
 
-                <MudSelect T="PriceMode" Label="Modo de precio" @bind-Value="_form.PriceMode" Required="true">
-                    <MudSelectItem Value="@PriceMode.PerVehicle">Por vehículo</MudSelectItem>
-                    <MudSelectItem Value="@PriceMode.Total">Total</MudSelectItem>
-                </MudSelect>
-
-                <MudNumericField T="decimal" @bind-Value="_form.Price" Label="Precio" Required="true" Min="0" />
-                <MudTextField @bind-Value="_form.Currency" Label="Moneda (3 letras)" Required="true" MaxLength="3" Immediate="true" />
-                <MudDatePicker @bind-Date="_form.ValidUntil" Label="Vigencia (opcional)" />
-                <MudTextField @bind-Value="_form.Notes" Label="Notas" Lines="3" />
-
-                <MudStack Row="true" Justify="@Justify.FlexEnd" Spacing="1">
-                    <MudButton Variant="Variant.Text" OnClick="Cancel">Cancelar</MudButton>
-                    <MudButton Color="Color.Primary" ButtonType="ButtonType.Submit">@(_isEdit ? "Guardar" : "Crear")</MudButton>
-                </MudStack>
+                <MudTextField T="int" Label="Requerimiento" Value="@CapacityRequestId" ReadOnly="true" />
             </MudStack>
-        </EditForm>
+
+            @* Selección de vehículo por disponibilidad *@
+            <MudAutocomplete T="VehiclePickDto"
+                             @bind-Value="_selectedVehicle"
+                             Label="Placa (disponible)"
+                             ToStringFunc="@(VehicleToString)"
+                             SearchFunc="SearchAvailableVehicles"
+                             Dense="true"
+                             Clearable="true"
+                             ResetValueOnEmptyText="true" />
+            @if (_selectedVehicle is not null && !string.IsNullOrWhiteSpace(_selectedVehicle.CapacityTonnageLabel))
+            {
+                <MudText Class="mud-text-caption mud-muted-text">
+                    Capacidad ref.: @_selectedVehicle.CapacityTonnageLabel
+                </MudText>
+            }
+
+            <MudStack Row="true" Spacing="2">
+                <MudNumericField T="int" @bind-Value="_quantity" Label="Cantidad" Min="1" Immediate="true" Required="true" />
+                <MudSelect T="PriceMode" Label="Modo precio" @bind-Value="_priceMode" Dense="true">
+                    <MudSelectItem Value="PriceMode.PerVehicle">Por vehículo</MudSelectItem>
+                    <MudSelectItem Value="PriceMode.Total">Total</MudSelectItem>
+                </MudSelect>
+            </MudStack>
+
+            <MudStack Row="true" Spacing="2">
+                <MudNumericField T="double" @bind-Value="_offeredWeightKg" Label="Peso ofrecido (kg)" Min="0" Immediate="true" />
+                <MudNumericField T="double" @bind-Value="_offeredVolumeM3" Label="Volumen ofrecido (m³)" Min="0" Immediate="true" />
+            </MudStack>
+
+            <MudStack Row="true" Spacing="2">
+                <MudNumericField T="decimal" @bind-Value="_price" Label="Precio" Min="0" Immediate="true" Required="true" />
+                <MudTextField @bind-Value="_currency" Label="Moneda" MaxLength="3" />
+            </MudStack>
+
+            <MudStack Row="true" Spacing="2">
+                <MudDatePicker @bind-Date="_validUntilDate" Label="Válida hasta (fecha)" />
+                <MudTimePicker @bind-Time="_validUntilTime" Label="Válida hasta (hora)" />
+            </MudStack>
+
+            <MudTextField @bind-Value="_notes" Label="Notas" Lines="3" />
+        </MudStack>
     </DialogContent>
+
+    <DialogActions>
+        <MudButton OnClick="Save" Color="Color.Primary" Variant="Variant.Filled">Guardar</MudButton>
+        <MudButton OnClick="Close" Variant="Variant.Outlined">Cancelar</MudButton>
+    </DialogActions>
 </MudDialog>
 
 @code {
+    // ========= Parámetros =========
     [CascadingParameter] public IMudDialogInstance MudDialog { get; set; } = default!;
 
     [Parameter] public int CapacityRequestId { get; set; }
     [Parameter] public int ProviderId { get; set; }
-    [Parameter] public VehicleOffer? CurrentOffer { get; set; }
 
-    private bool _isEdit => CurrentOffer is not null;
+    // Edición (DTO existente)
+    [Parameter] public VehicleOfferDto? CurrentOffer { get; set; }
 
-    public class OfferFormModel
+    // Modo admin (puede cambiar proveedor)
+    [Parameter] public bool IsAdmin { get; set; } = false;
+
+    // Datos opcionales del requerimiento (para resumen y disponibilidad)
+    [Parameter] public DateTime? ReqServiceDate { get; set; }
+    [Parameter] public string? ReqZone { get; set; }
+    [Parameter] public TimeSpan? ReqWindowStart { get; set; }
+    [Parameter] public TimeSpan? ReqWindowEnd { get; set; }
+    [Parameter] public bool? ReqOnlyTargetProvider { get; set; }
+
+    // ========= Estado =========
+    bool _isEdit => CurrentOffer is not null;
+    int _offerId => CurrentOffer?.Id ?? 0;
+
+    Provider? _selectedProvider;
+    VehiclePickDto? _selectedVehicle;
+    int? _vehicleId => _selectedVehicle?.Id;
+
+    int _quantity = 1;
+    double _offeredWeightKg;
+    double _offeredVolumeM3;
+
+    decimal _price;
+    string _currency = "PEN";
+    PriceMode _priceMode = PriceMode.PerVehicle;
+
+    DateTime? _validUntilDate;
+    TimeSpan? _validUntilTime;
+
+    string? _notes;
+
+    string _reqSummary = string.Empty;
+
+    protected override void OnParametersSet()
     {
-        public int CapacityRequestId { get; set; }
-        public int ProviderId { get; set; }
-        public int? VehicleId { get; set; }
-        public int Quantity { get; set; } = 1;
-        public double OfferedWeightKg { get; set; }
-        public double OfferedVolumeM3 { get; set; }
-        public decimal Price { get; set; }
-        public string Currency { get; set; } = "PEN";
-        public PriceMode PriceMode { get; set; } = PriceMode.PerVehicle;
-        public DateTime? ValidUntil { get; set; }
-        public string? Notes { get; set; }
-    }
+        // Resumen del requerimiento (usando parámetros, no propiedades inexistentes del DTO)
+        _reqSummary = BuildReqSummary();
 
-    private OfferFormModel _form = new();
-
-    protected override void OnInitialized()
-    {
-        if (_isEdit)
+        if (!_isEdit)
         {
-            _form = new OfferFormModel
-            {
-                CapacityRequestId = CurrentOffer!.CapacityRequestId,
-                ProviderId = CurrentOffer.ProviderId,
-                VehicleId = CurrentOffer.VehicleId,
-                Quantity = CurrentOffer.Quantity,
-                OfferedWeightKg = CurrentOffer.OfferedWeightKg,
-                OfferedVolumeM3 = CurrentOffer.OfferedVolumeM3,
-                Price = CurrentOffer.Price,
-                Currency = CurrentOffer.Currency,
-                PriceMode = CurrentOffer.PriceMode,
-                ValidUntil = CurrentOffer.ValidUntil,
-                Notes = CurrentOffer.Notes
-            };
-        }
-        else
-        {
-            _form = new OfferFormModel
-            {
-                CapacityRequestId = CapacityRequestId,
-                ProviderId = ProviderId,
-                Quantity = 1,
-                Currency = "PEN",
-                PriceMode = PriceMode.PerVehicle
-            };
-        }
-
-        if (_form.CapacityRequestId <= 0)
-            Snackbar.Add("Falta el requerimiento: abre el diálogo desde un requerimiento o pásalo como parámetro.", Severity.Warning);
-    }
-
-    private async Task SaveAsync()
-    {
-        if (_form.CapacityRequestId <= 0)
-        {
-            Snackbar.Add("No se puede guardar: falta el Id de requerimiento.", Severity.Error);
+            _quantity = 1;
+            _currency = "PEN";
+            _priceMode = PriceMode.PerVehicle;
             return;
         }
 
-        var currency = string.IsNullOrWhiteSpace(_form.Currency) ? "PEN" : _form.Currency.Trim().ToUpperInvariant();
-        if (currency.Length > 3) currency = currency[..3];
+        _quantity = CurrentOffer!.Quantity;
+        _offeredWeightKg = CurrentOffer!.OfferedWeightKg;
+        _offeredVolumeM3 = CurrentOffer!.OfferedVolumeM3;
+        _price = CurrentOffer!.Price;
+        _currency = CurrentOffer!.Currency;
+        _priceMode = CurrentOffer!.PriceMode;
+        _notes = CurrentOffer!.Notes;
 
-        var dto = new VehicleOffersClient.SaveVehicleOfferDto(
-            CapacityRequestId: _form.CapacityRequestId,
-            ProviderId: _form.ProviderId,
-            VehicleId: _form.VehicleId,
-            Quantity: Math.Max(1, _form.Quantity),
-            OfferedWeightKg: Math.Max(0, _form.OfferedWeightKg),
-            OfferedVolumeM3: Math.Max(0, _form.OfferedVolumeM3),
-            Price: Math.Max(0, _form.Price),
-            Currency: currency,
-            PriceMode: _form.PriceMode,
-            ValidUntil: _form.ValidUntil,
-            Notes: _form.Notes
-        );
-
-        var response = _isEdit
-            ? await OffersApi.UpdateAsync(CurrentOffer!.Id, dto)
-            : await OffersApi.CreateAsync(dto); // si tu ruta es "api/vehicleoffers/create", ajústalo en el client
-
-        if (response.IsSuccessStatusCode)
+        if (CurrentOffer!.ValidUntil is DateTime vu)
         {
-            Snackbar.Add("Oferta guardada", Severity.Success);
-            MudDialog.Close(DialogResult.Ok(true));
-        }
-        else
-        {
-            Snackbar.Add($"Error: {await response.Content.ReadAsStringAsync()}", Severity.Error);
+            _validUntilDate = vu.Date;
+            _validUntilTime = vu.TimeOfDay;
         }
     }
 
-    private void Cancel() => MudDialog.Cancel();
+    private string BuildReqSummary()
+    {
+        var parts = new List<string>();
+        if (ReqServiceDate is DateTime d) parts.Add(d.ToString("yyyy-MM-dd"));
+        if (!string.IsNullOrWhiteSpace(ReqZone)) parts.Add(ReqZone!);
+        if (ReqWindowStart.HasValue && ReqWindowEnd.HasValue)
+            parts.Add($"{ReqWindowStart:hh\\:mm}-{ReqWindowEnd:hh\\:mm}");
+        return parts.Count > 0 ? $" · {string.Join(" · ", parts)}" : string.Empty;
+    }
+
+    // --- Proveedores (admin) ---
+    private async Task<IEnumerable<Provider>> SearchProviders(string value, CancellationToken ct)
+    {
+        var page = await ProvidersApi.GetPagedAsync(
+            term: string.IsNullOrWhiteSpace(value) ? null : value,
+            page: 1, recordsNumber: 10, sortBy: "Name", sortDir: "asc", cancellationToken: ct);
+
+        ct.ThrowIfCancellationRequested();
+        return page?.Items ?? Enumerable.Empty<Provider>();
+    }
+
+    // --- Placas disponibles ---
+    private async Task<IEnumerable<VehiclePickDto>> SearchAvailableVehicles(string value, CancellationToken ct)
+    {
+        var providerId = IsAdmin ? (_selectedProvider?.Id ?? ProviderId) : ProviderId;
+        var serviceDate = ReqServiceDate ?? DateTime.Today; // si no te lo pasan, fallback al hoy
+
+        var items = await VehiclesApi.GetAvailableAsync(
+            providerId: providerId,
+            serviceDate: serviceDate,
+            term: string.IsNullOrWhiteSpace(value) ? null : value,
+            cancellationToken: ct);
+
+        ct.ThrowIfCancellationRequested();
+        return items ?? Enumerable.Empty<VehiclePickDto>();
+    }
+
+    private static string VehicleToString(VehiclePickDto? v)
+        => v is null ? string.Empty
+                     : (string.IsNullOrWhiteSpace(v.CapacityTonnageLabel)
+                        ? v.Plate
+                        : $"{v.Plate} ({v.CapacityTonnageLabel})");
+
+    private async Task Save()
+    {
+        // Válida hasta
+        DateTime? validUntil = null;
+        if (_validUntilDate.HasValue)
+        {
+            var t = _validUntilTime ?? new TimeSpan(23, 59, 0);
+            validUntil = _validUntilDate.Value.Date + t;
+        }
+
+        // Moneda segura
+        var safeCurrency = string.IsNullOrWhiteSpace(_currency) ? "PEN" : _currency.Trim().ToUpperInvariant();
+        if (safeCurrency.Length > 3) safeCurrency = safeCurrency[..3];
+
+        var providerIdForSave = IsAdmin ? (_selectedProvider?.Id ?? ProviderId) : ProviderId;
+
+        // var dto = new SaveVehicleOfferDto(
+        //     CapacityRequestId: CapacityRequestId,
+        //     ProviderId: providerIdForSave,
+        //     VehicleId: _vehicleId, // opcional
+        //     Quantity: Math.Max(1, _quantity),
+        //     OfferedWeightKg: Math.Max(0, _offeredWeightKg),
+        //     OfferedVolumeM3: Math.Max(0, _offeredVolumeM3),
+        //     Price: Math.Max(0, _price),
+        //     Currency: safeCurrency,
+        //     PriceMode: _priceMode,
+        //     ValidUntil: validUntil,
+        //     Notes: string.IsNullOrWhiteSpace(_notes) ? null : _notes!.Trim()
+        // );
+
+        var dto = new SaveVehicleOfferDto
+        {
+            CapacityRequestId = CapacityRequestId,
+            ProviderId = providerIdForSave,
+            VehicleId = _vehicleId,
+            Quantity = Math.Max(1, _quantity),
+            OfferedWeightKg = Math.Max(0, _offeredWeightKg),
+            OfferedVolumeM3 = Math.Max(0, _offeredVolumeM3),
+            Price = Math.Max(0, _price),
+            Currency = safeCurrency,
+            PriceMode = _priceMode,
+            ValidUntil = validUntil,
+            Notes = string.IsNullOrWhiteSpace(_notes) ? null : _notes!.Trim(),
+            Lines = null
+        };
+
+        var resp = _isEdit
+            ? await OffersApi.UpdateAsync(_offerId, dto)
+            : await OffersApi.CreateAsync(dto);
+
+        if (resp.IsSuccessStatusCode)
+        {
+            Snackbar.Add("Oferta guardada.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+            return;
+        }
+
+        var body = await resp.Content.ReadAsStringAsync();
+        Snackbar.Add($"Error al guardar: {(int)resp.StatusCode} - {body}", Severity.Error);
+    }
+
+    void Close() => MudDialog.Cancel();
 }

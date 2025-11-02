@@ -12,8 +12,8 @@ using Route.Backend.Data;
 namespace Route.Backend.Migrations
 {
     [DbContext(typeof(DataContext))]
-    [Migration("20251020033046_InitialDB")]
-    partial class InitialDB
+    [Migration("20251025151728_InitialDb")]
+    partial class InitialDb
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
